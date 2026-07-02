@@ -1,0 +1,97 @@
+{
+  "theme": "dark",
+  "archetype": "Editorial Brutalism / Intellectual Luxury",
+  "colors": {
+    "background": "#050505",
+    "surface": "#0F0F0F",
+    "surface_elevated": "#1A1A1A",
+    "primary": "#E03C31",
+    "primary_hover": "#FF5247",
+    "secondary": "#C5A059",
+    "text_primary": "#F5F2EB",
+    "text_secondary": "#A19D94",
+    "text_muted": "#666666",
+    "border": "#262626",
+    "danger": "#FF3B30",
+    "success": "#32D74B",
+    "gradient_accent": "linear-gradient(135deg, rgba(224,60,49,0.15) 0%, rgba(197,160,89,0.05) 100%)"
+  },
+  "typography": {
+    "font_families": {
+      "heading": "'Cormorant Garamond', serif",
+      "body": "'Outfit', sans-serif",
+      "mono": "'JetBrains Mono', monospace"
+    },
+    "scales": {
+      "h1": "text-5xl md:text-6xl tracking-tighter leading-none font-medium font-serif",
+      "h2": "text-3xl md:text-4xl tracking-tight leading-tight font-serif",
+      "h3": "text-xl md:text-2xl tracking-normal font-serif",
+      "body": "text-base leading-relaxed font-sans",
+      "body_sm": "text-sm leading-relaxed font-sans text-text_secondary",
+      "overline": "text-xs tracking-[0.2em] uppercase font-mono text-text_muted"
+    }
+  },
+  "spacing": {
+    "container_padding": "p-6 md:p-12 lg:p-24",
+    "section_gap": "gap-16 md:gap-32",
+    "element_gap": "gap-6 md:gap-8"
+  },
+  "components": {
+    "buttons": {
+      "primary": "rounded-sm bg-text_primary text-background hover:bg-white transition-colors duration-300 font-sans font-medium text-sm px-8 py-4 flex items-center justify-center",
+      "secondary": "rounded-sm border border-border bg-transparent text-text_primary hover:bg-surface_elevated transition-colors duration-300 font-sans text-sm px-8 py-4",
+      "danger_recording": "rounded-full bg-primary text-white shadow-[0_0_30px_rgba(224,60,49,0.4)] animate-pulse"
+    },
+    "cards": {
+      "default": "bg-surface border border-border p-8 rounded-lg hover:border-text_muted transition-all duration-300",
+      "glass": "backdrop-blur-2xl bg-[#0F0F0F]/60 border border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.5)] p-8 rounded-xl",
+      "floating": "bg-surface_elevated border border-border p-6 rounded-xl shadow-2xl hover:-translate-y-2 transition-transform duration-500 ease-out"
+    },
+    "microphone": {
+      "recording_state": "relative flex items-center justify-center w-24 h-24 rounded-full bg-primary/20 border border-primary shadow-[0_0_40px_rgba(224,60,49,0.3)]",
+      "idle_state": "relative flex items-center justify-center w-24 h-24 rounded-full bg-surface border border-border hover:border-text_secondary transition-all duration-300",
+      "icon_size": "w-8 h-8"
+    },
+    "inputs": {
+      "default": "w-full bg-surface_elevated border border-border rounded-sm px-4 py-3 text-text_primary focus:border-text_primary focus:ring-1 focus:ring-text_primary outline-none transition-all font-sans placeholder:text-text_muted"
+    }
+  },
+  "motion": {
+    "hover": "transition-all duration-300 ease-out",
+    "page_transition": "animate-in fade-in slide-in-from-bottom-4 duration-700",
+    "soundwave": "flex gap-[2px] items-center justify-center h-12"
+  },
+  "media": {
+    "images": {
+      "hero_background": {
+        "url": "https://images.unsplash.com/photo-1608501821300-4f99e58bba77?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1ODB8MHwxfHNlYXJjaHwxfHxhYnN0cmFjdCUyMGRhcmslMjBtYXJibGUlMjB0ZXh0dXJlfGVufDB8fHx8MTc4Mjk5MDMwNnww&ixlib=rb-4.1.0&q=85",
+        "description": "Dark blue and black fluid art used for atmospheric textures in the hero section. Should be used with very low opacity (10-15%) or mix-blend-mode to avoid overpowering the text."
+      },
+      "debate_mode_bg": {
+        "url": "https://images.unsplash.com/photo-1636953056323-9c09fdd74fa6?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzV8MHwxfHNlYXJjaHwxfHxhYnN0cmFjdCUyMGRhcmslMjBzb3VuZHdhdmUlMjB2aXN1YWxpemF0aW9ufGVufDB8fHx8MTc4Mjk5MDMwNnww&ixlib=rb-4.1.0&q=85",
+        "description": "Abstract dark soundwave visualization. Ideal for the background of the live debate session screen or audio playback areas."
+      }
+    }
+  },
+  "layout": {
+    "dashboard": "grid grid-cols-1 md:grid-cols-12 gap-6 items-start",
+    "bento": "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6",
+    "glass_header": "sticky top-0 z-50 w-full backdrop-blur-xl bg-[#050505]/80 border-b border-border"
+  },
+  "iconography": {
+    "library": "lucide-react",
+    "style": "stroke-[1.5px]"
+  },
+  "instructions_to_main_agent": [
+    "Design Identity: Execute 'Editorial Brutalism / Intellectual Luxury'. The UI should feel like a serious philosophy tool, not a friendly chatbot. Avoid generic Vercel/Stripe aesthetics.",
+    "Typography: Import 'Cormorant Garamond', 'Outfit', and 'JetBrains Mono' from Google Fonts in index.css. Never use Inter or Roboto.",
+    "Colors: Strictly adhere to the dark mode palette. Use Void Black (#050505) for the app background. Avoid purple/violet gradients completely.",
+    "Cards & Components: Implement 'floating cards' and 'glassmorphism' as specified in the components.cards section. Use subtle borders (#262626) to define structure without heavy shadows.",
+    "Microphone Interaction: The hero interaction is the microphone. Use the provided recording/idle states. When active, it should pulse with the primary red color (#E03C31).",
+    "Sound Waves: Implement an animated CSS bar visualizer for sound waves during active AI/User speaking states.",
+    "Data Viz: For the post-debate analysis, use 'recharts' to build a dark-themed radar chart and bar charts reflecting the debate scores.",
+    "Testing: ALL interactive and key informational elements MUST include a `data-testid` attribute (e.g., data-testid='start-debate-btn').",
+    "HTML structure: Do not wrap components in generic containers; use raw HTML semantic tags (section, article, header, main) styled with Tailwind.",
+    "Gradients: Use the `gradient_accent` variable sparingly as a subtle background glow behind important cards or the microphone area, ensuring high contrast for text overlay."
+  ]
+}
