@@ -31,9 +31,11 @@ dist/
 dist
 
 # Environment files (comprehensive coverage)
+# Note: .env.example is NOT ignored - it serves as a template for required env vars
 
 *token.json*
 *credentials.json*
+!.env.example
 
 # Logs and debug files
 npm-debug.log*
@@ -91,3 +93,6 @@ android-sdk/
 credentials.json
 *.key
 .credentials
+
+# Allow .env.example files (they serve as templates)
+!.env.example
