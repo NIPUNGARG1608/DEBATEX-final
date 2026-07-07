@@ -95,6 +95,9 @@ credentials.json
 *.key
 .credentials
 
-# Allow .env and .env.example for production deployment (contains public backend URL)
+# Allow root .env and .env.example for production deployment (contains public backend URL)
 !.env
 !.env.example
+
+# Ignore backend .env (contains secrets)
+backend/.env

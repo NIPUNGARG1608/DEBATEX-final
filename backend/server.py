@@ -38,9 +38,17 @@ logger = logging.getLogger("debatex")
 
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
 DB_NAME = os.environ.get("DB_NAME", "debatex")
-JWT_SECRET = os.environ.get("JWT_SECRET", "debatex-secure-jwt-secret-key-2024-production-ready-32bytes")
+JWT_SECRET = os.environ.get("JWT_SECRET", "")
 JWT_ALGO = "HS256"
 JWT_TTL_HOURS = 24 * 7  # 7 days
+
+# Critical: Both JWT_SECRET and GROQ_API_KEY MUST be set in backend/.env
+# Startup validation will raise an error if they are missing.
+if not JWT_SECRET or len(JWT_SECRET) < 32:
+    raise RuntimeError(
+        "JWT_SECRET is not set or is too short. "
+        "Create backend/.env with a secure random value of at least 32 characters."
+    )
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
 groq_client: Optional[Groq] = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
