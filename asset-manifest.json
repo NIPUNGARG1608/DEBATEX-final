@@ -1,0 +1,13 @@
+{
+  "files": {
+    "main.css": "/DEBATEX-final/static/css/main.6fbae844.css",
+    "main.js": "/DEBATEX-final/static/js/main.8c30eacd.js",
+    "index.html": "/DEBATEX-final/index.html",
+    "main.6fbae844.css.map": "/DEBATEX-final/static/css/main.6fbae844.css.map",
+    "main.8c30eacd.js.map": "/DEBATEX-final/static/js/main.8c30eacd.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.6fbae844.css",
+    "static/js/main.8c30eacd.js"
+  ]
+}
