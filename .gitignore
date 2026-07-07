@@ -96,3 +96,6 @@ credentials.json
 
 # Allow .env.example files (they serve as templates)
 !.env.example
+
+# Allow frontend/.env for production deployment (contains public backend URL)
+!frontend/.env
