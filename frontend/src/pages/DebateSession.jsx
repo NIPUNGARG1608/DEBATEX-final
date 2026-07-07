@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import api from "@/lib/api";
 import { toast } from "sonner";
-import { useSpeechRecognition, useSpeechSynthesis } from "@/hooks/useSpeech";
+import { useSpeechRecognition, useEdgeSpeechSynthesis } from "@/hooks/useSpeech";
 import MicButton from "@/components/MicButton";
 import SoundWave from "@/components/SoundWave";
 import { Send, StopCircle, Flag, Loader2, Globe } from "lucide-react";
@@ -17,25 +17,33 @@ export default function DebateSession() {
   const [error, setError] = useState(null);
   const scrollRef = useRef(null);
 
-  const { supported: sttSupported, listening, interim, finalText, start, stop, setFinalText } =
+  const { supported: sttSupported, listening, interim, finalText, error: sttError, start, stop, setFinalText } =
     useSpeechRecognition({});
-  const { supported: ttsSupported, speaking, speak, cancel: cancelSpeak } = useSpeechSynthesis();
+  const { supported: ttsSupported, speaking, speak, cancel: cancelSpeak } = useEdgeSpeechSynthesis();
 
   // Load debate
   useEffect(() => {
     api.get(`/debates/${id}`).then((r) => {
       setDebate(r.data);
-      // Auto-speak opener
+      // Auto-speak opener with voice character profile
       const opener = r.data.messages[0];
-      if (opener && ttsSupported) setTimeout(() => speak(opener.content), 300);
+      if (opener && ttsSupported) {
+        const vc = r.data.voice_character;
+        setTimeout(() => speak(opener.content, { voiceCharacter: vc }), 300);
+      }
     }).catch((e) => setError(e?.response?.data?.detail || "Debate not found"));
-    return () => { try { window.speechSynthesis?.cancel(); } catch (e) { void e; } };
+    return () => { cancelSpeak(); };
   }, [id]);
 
   // Auto-scroll on new messages
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [debate?.messages?.length, interim]);
+
+  // Use a ref to track the latest finalText so we can read it immediately
+  // after stop() without waiting for a React re-render.
+  const finalTextRef = useRef("");
+  useEffect(() => { finalTextRef.current = finalText; }, [finalText]);
 
   const submitTurn = async (message) => {
     const clean = (message || "").trim();
@@ -53,9 +61,12 @@ export default function DebateSession() {
     try {
       const { data } = await api.post("/debates/turn", { debate_id: id, user_message: clean });
       setDebate(data);
-      // Speak the new AI reply
+      // Speak the new AI reply with voice character profile via Edge-TTS
       const last = data.messages[data.messages.length - 1];
-      if (last?.role === "assistant" && ttsSupported) speak(last.content);
+      if (last?.role === "assistant" && ttsSupported) {
+        const vc = data.voice_character;
+        speak(last.content, { voiceCharacter: vc });
+      }
     } catch (e) {
       toast.error(e?.response?.data?.detail || "AI reply failed");
     } finally {
@@ -70,8 +81,9 @@ export default function DebateSession() {
     }
     if (listening) {
       stop();
-      // submit what we have if any
-      const captured = (finalText || "").trim();
+      // Read from the ref to avoid stale closure — the last onresult may
+      // have fired after the current render's finalText was captured.
+      const captured = (finalTextRef.current || "").trim();
       if (captured) submitTurn(captured);
     } else {
       // If AI is speaking, interrupt
@@ -85,7 +97,7 @@ export default function DebateSession() {
     const hasUserTurn = debate.messages.some((m) => m.role === "user");
     if (!hasUserTurn) return toast.error("Speak at least once to get a report.");
     setFinalizing(true);
-    try { window.speechSynthesis?.cancel(); } catch (e) { void e; }
+    try { cancelSpeak(); } catch (e) { void e; }
     try {
       await api.post(`/debates/${id}/report`);
       navigate(`/report/${id}`);
@@ -94,6 +106,11 @@ export default function DebateSession() {
       setFinalizing(false);
     }
   };
+
+  // Surface STT errors (e.g. "not-allowed" = mic permission denied)
+  useEffect(() => {
+    if (sttError) toast.error(`Microphone: ${sttError}`);
+  }, [sttError]);
 
   if (error) return <div className="p-10 text-muted_ink">{error}</div>;
   if (!debate) return <div className="p-10 font-mono text-xs uppercase tracking-[0.2em] text-muted_ink">Loading…</div>;
@@ -109,6 +126,11 @@ export default function DebateSession() {
           <h1 data-testid="debate-topic" className="font-serif text-3xl md:text-4xl tracking-tight leading-tight text-balance">
             {debate.topic}
           </h1>
+          {debate.voice_character && (
+            <p className="font-mono text-[9px] uppercase tracking-[0.28em] text-gold mt-2">
+              Voice: {debate.voice_character}
+            </p>
+          )}
         </div>
         <button
           data-testid="end-debate-btn"

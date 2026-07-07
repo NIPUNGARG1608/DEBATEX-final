@@ -1,12 +1,15 @@
 """
-DebateX Backend — FastAPI + MongoDB + Groq
+DebateX Backend — FastAPI + MongoDB + Groq + Edge-TTS
 
 Provides authentication (JWT), debate session management, live turn-by-turn
 AI debate replies powered by Groq (llama-3.3-70b-versatile + groq/compound
-for web-search-augmented responses), and post-debate analysis.
+for web-search-augmented responses), voice character profiles, and
+post-debate analysis. Text-to-speech is powered by Microsoft Edge-TTS
+(free, high-quality, human-like voices).
 """
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -22,19 +25,20 @@ import logging
 import bcrypt
 import jwt as pyjwt
 from groq import Groq
+import edge_tts
 
 # --------------------------------------------------------------------------- #
 # Setup
 # --------------------------------------------------------------------------- #
-ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / ".env")
+ROOT_DIR = Path(__file__).resolve().parent
+load_dotenv(ROOT_DIR / ".env", override=True)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("debatex")
 
-MONGO_URL = os.environ["MONGO_URL"]
-DB_NAME = os.environ["DB_NAME"]
-JWT_SECRET = os.environ.get("JWT_SECRET", "dev-secret")
+MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
+DB_NAME = os.environ.get("DB_NAME", "debatex")
+JWT_SECRET = os.environ.get("JWT_SECRET", "debatex-secure-jwt-secret-key-2024-production-ready-32bytes")
 JWT_ALGO = "HS256"
 JWT_TTL_HOURS = 24 * 7  # 7 days
 
@@ -47,6 +51,44 @@ db = mongo[DB_NAME]
 app = FastAPI(title="DebateX API")
 api = APIRouter(prefix="/api")
 security = HTTPBearer(auto_error=False)
+
+
+# --------------------------------------------------------------------------- #
+# Edge-TTS Voice Mapping
+# --------------------------------------------------------------------------- #
+EDGE_TTS_VOICE_MAP = {
+    "sage": "en-US-EmmaNeural",      # Calm, intellectual voice
+    "maverick": "en-US-GuyNeural",   # Sharp, authoritative voice
+}
+DEFAULT_EDGE_TTS_VOICE = "en-US-JennyNeural"
+
+
+# --------------------------------------------------------------------------- #
+# Voice Characters
+# --------------------------------------------------------------------------- #
+VOICE_CHARACTERS = {
+    "sage": {
+        "id": "sage",
+        "name": "Sage",
+        "tagline": "Calm, intellectual",
+        "description": "Thoughtful and precise. Speaks with the measured wisdom of a philosopher. Chooses every word carefully.",
+        "tts_profile": {"voice_preference": "warm_female", "rate": 0.92, "pitch": 1.10},
+    },
+    "maverick": {
+        "id": "maverick",
+        "name": "Maverick",
+        "tagline": "Sharp, aggressive",
+        "description": "Uncompromising and direct. A rhetorical pitbull who goes for the jugular. No pleasantries.",
+        "tts_profile": {"voice_preference": "deep_male", "rate": 1.10, "pitch": 0.85},
+    },
+    "echo": {
+        "id": "echo",
+        "name": "Echo",
+        "tagline": "Balanced, neutral",
+        "description": "Clear and even-handed. A neutral moderator who lets the arguments speak for themselves.",
+        "tts_profile": {"voice_preference": "neutral", "rate": 1.0, "pitch": 1.0},
+    },
+}
 
 
 # --------------------------------------------------------------------------- #
@@ -85,6 +127,7 @@ class DebateCreate(BaseModel):
     topic: str = Field(min_length=1, max_length=300)
     mode: str
     user_stance: Optional[str] = None  # "for" / "against" / None
+    voice_character: Optional[str] = None  # "sage" / "maverick" / "echo" / None
 
 
 class DebateTurn(BaseModel):
@@ -99,6 +142,7 @@ class DebateOut(BaseModel):
     topic: str
     mode: str
     user_stance: Optional[str] = None
+    voice_character: Optional[str] = None
     messages: List[Message] = []
     created_at: str
     updated_at: str
@@ -113,6 +157,11 @@ class BookmarkToggle(BaseModel):
 
 class FavoriteTopic(BaseModel):
     topic: str
+
+
+class TTSRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=2000)
+    voice_character: Optional[str] = None  # "sage" / "maverick" / "echo" / None
 
 
 # --------------------------------------------------------------------------- #
@@ -201,12 +250,22 @@ Core behavior:
 - Keep replies conversational and voice-friendly: 2-5 sentences, no markdown headings, no bullet lists, no code blocks. Plain spoken language."""
 
 
-def build_system_prompt(mode: str, topic: str, user_stance: Optional[str]) -> str:
+def build_system_prompt(mode: str, topic: str, user_stance: Optional[str], voice_char: Optional[str] = None) -> str:
     mode_prompt = DEBATE_MODES.get(mode, DEBATE_MODES["devils_advocate"])
     stance_line = ""
     if user_stance:
         stance_line = f"\nThe user's stance is: '{user_stance}'. You must argue against it (unless the user's later reasoning genuinely overpowers yours)."
-    return f"{BASE_PERSONA}\n\nMode: {mode_prompt}\n\nDebate topic: \"{topic}\".{stance_line}"
+
+    # Voice character persona tint
+    voice_persona = ""
+    if voice_char and voice_char in VOICE_CHARACTERS:
+        vc = VOICE_CHARACTERS[voice_char]
+        voice_persona = (
+            f"\n\nYour speaking persona is '{vc['name']}': {vc['tagline']}. {vc['description']} "
+            "This affects your tone and delivery — embody this character naturally in your responses."
+        )
+
+    return f"{BASE_PERSONA}\n\nMode: {mode_prompt}{stance_line}{voice_persona}\n\nDebate topic: \"{topic}\"."
 
 
 TIME_SENSITIVE_HINTS = re.compile(
@@ -347,6 +406,55 @@ async def list_modes():
     ]
 
 
+@api.get("/voices")
+async def list_voices():
+    """Return available voice character profiles."""
+    return [vc for vc in VOICE_CHARACTERS.values()]
+
+
+# --------------------------------------------------------------------------- #
+# Route: Text-to-Speech (Edge-TTS)
+# --------------------------------------------------------------------------- #
+@api.post("/tts")
+async def text_to_speech(payload: TTSRequest):
+    """
+    Convert text to speech using Microsoft Edge-TTS.
+    Returns streaming MP3 audio data.
+    
+    Maps voice_character to Edge-TTS voices:
+      - 'sage'    -> en-US-EmmaNeural (calm, intellectual)
+      - 'maverick' -> en-US-GuyNeural (sharp, authoritative)
+      - default   -> en-US-JennyNeural (neutral, clear)
+    """
+    voice = EDGE_TTS_VOICE_MAP.get(payload.voice_character, DEFAULT_EDGE_TTS_VOICE)
+    text = payload.text.strip()
+
+    if not text:
+        raise HTTPException(status_code=400, detail="Text is required")
+
+    try:
+        # Create an edge-tts Communicate instance
+        communicate = edge_tts.Communicate(text=text, voice=voice)
+
+        # Stream the audio data generator
+        async def audio_stream():
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    yield chunk["data"]
+
+        return StreamingResponse(
+            audio_stream(),
+            media_type="audio/mpeg",
+            headers={
+                "X-Edge-TTS-Voice": voice,
+                "Cache-Control": "no-cache",
+            },
+        )
+    except Exception as e:
+        logger.error(f"Edge-TTS error: {e}")
+        raise HTTPException(status_code=502, detail=f"Text-to-speech error: {str(e)[:200]}")
+
+
 # --------------------------------------------------------------------------- #
 # Routes: Auth
 # --------------------------------------------------------------------------- #
@@ -423,11 +531,16 @@ def _debate_doc_to_out(doc: dict) -> dict:
 async def create_debate(payload: DebateCreate, user=Depends(current_user)):
     if payload.mode not in DEBATE_MODES:
         raise HTTPException(status_code=400, detail="Invalid mode")
+
+    # Validate voice_character if provided
+    if payload.voice_character and payload.voice_character not in VOICE_CHARACTERS:
+        raise HTTPException(status_code=400, detail=f"Invalid voice_character. Choose from: {', '.join(VOICE_CHARACTERS.keys())}")
+
     now = datetime.now(timezone.utc).isoformat()
     debate_id = str(uuid.uuid4())
 
     # Opening message from AI to kick off the debate
-    system = build_system_prompt(payload.mode, payload.topic, payload.user_stance)
+    system = build_system_prompt(payload.mode, payload.topic, payload.user_stance, payload.voice_character)
     opener_prompt = (
         f"Begin the debate on: '{payload.topic}'. Give a brief, provocative opening (2-3 sentences) "
         "that stakes out a strong opposing position and invites the user to respond. No preamble."
@@ -448,6 +561,7 @@ async def create_debate(payload: DebateCreate, user=Depends(current_user)):
         "topic": payload.topic.strip(),
         "mode": payload.mode,
         "user_stance": payload.user_stance,
+        "voice_character": payload.voice_character,
         "messages": [opener.model_dump()],
         "created_at": now,
         "updated_at": now,
@@ -488,7 +602,7 @@ async def debate_turn(payload: DebateTurn, user=Depends(current_user)):
 
     # Build history for groq
     history = [{"role": m["role"], "content": m["content"]} for m in doc["messages"]]
-    system = build_system_prompt(doc["mode"], doc["topic"], doc.get("user_stance"))
+    system = build_system_prompt(doc["mode"], doc["topic"], doc.get("user_stance"), doc.get("voice_character"))
     ai_text, used_search = await groq_debate_reply(system, history, user_msg.content)
     ai_msg = Message(role="assistant", content=ai_text, used_web_search=used_search)
 

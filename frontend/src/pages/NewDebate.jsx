@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "@/lib/api";
 import { toast } from "sonner";
-import { Star, StarOff, ArrowRight } from "lucide-react";
+import { Star, StarOff, ArrowRight, BookOpen, Zap, Disc3 } from "lucide-react";
 
 const SUGGESTED = [
   "Should AI replace teachers?",
@@ -13,17 +13,26 @@ const SUGGESTED = [
   "Can art be replaced by AI?",
 ];
 
+const VOICE_ICONS = {
+  sage: BookOpen,
+  maverick: Zap,
+  echo: Disc3,
+};
+
 export default function NewDebate() {
   const navigate = useNavigate();
   const [modes, setModes] = useState([]);
+  const [voices, setVoices] = useState([]);
   const [favorites, setFavorites] = useState([]);
   const [topic, setTopic] = useState("");
   const [stance, setStance] = useState("");
   const [modeId, setModeId] = useState("devils_advocate");
+  const [voiceId, setVoiceId] = useState(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     api.get("/modes").then((r) => setModes(r.data));
+    api.get("/voices").then((r) => setVoices(r.data));
     api.get("/favorites").then((r) => setFavorites(r.data.favorites || []));
   }, []);
 
@@ -49,6 +58,7 @@ export default function NewDebate() {
         topic: topic.trim(),
         mode: modeId,
         user_stance: stance.trim() || null,
+        voice_character: voiceId || null,
       });
       navigate(`/debate/${data.id}`);
     } catch (e) {
@@ -158,6 +168,71 @@ export default function NewDebate() {
               </button>
             );
           })}
+        </div>
+      </div>
+
+      {/* Voice Character */}
+      <div className="mb-16">
+        <p className="font-mono text-[10px] uppercase tracking-[0.28em] text-muted_ink mb-4">04 — Choose a voice (optional)</p>
+        <p className="font-mono text-[9px] uppercase tracking-[0.2em] text-muted_ink mb-6">
+          Select a speaking character for your AI opponent. Each has a distinct personality and delivery style.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {voices.map((v) => {
+            const selected = voiceId === v.id;
+            const Icon = VOICE_ICONS[v.id] || Disc3;
+            return (
+              <button
+                key={v.id}
+                data-testid={`voice-${v.id}`}
+                onClick={() => setVoiceId(selected ? null : v.id)}
+                className={`text-left p-6 rounded-lg border transition-all duration-300 ${
+                  selected
+                    ? "border-gold bg-gold/5 shadow-[0_0_30px_rgba(197,160,89,0.15)]"
+                    : "border-rule bg-surface hover:border-parchment/40"
+                }`}
+              >
+                {/* SVG doodle icon */}
+                <div className={`mb-5 flex items-center justify-center w-14 h-14 rounded-full border ${
+                  selected ? "border-gold text-gold" : "border-rule text-muted_ink"
+                }`}>
+                  <Icon className="w-7 h-7" strokeWidth={1.2} />
+                </div>
+                <p className={`font-mono text-[10px] uppercase tracking-[0.24em] mb-3 ${
+                  selected ? "text-gold" : "text-muted_ink"
+                }`}>
+                  {selected ? "Selected" : "Select"}
+                </p>
+                <p className="font-serif text-2xl leading-tight mb-1">{v.name}</p>
+                <p className="text-sm text-muted_ink mb-3">{v.tagline}</p>
+                <p className="text-xs text-muted_ink/70 leading-relaxed">{v.description}</p>
+              </button>
+            );
+          })}
+          {/* None option */}
+          <button
+            data-testid="voice-none"
+            onClick={() => setVoiceId(null)}
+            className={`text-left p-6 rounded-lg border transition-all duration-300 ${
+              voiceId === null
+                ? "border-rule bg-surface/50"
+                : "border-rule bg-surface hover:border-parchment/40"
+            }`}
+          >
+            <div className={`mb-5 flex items-center justify-center w-14 h-14 rounded-full border border-dashed ${
+              voiceId === null ? "border-muted_ink text-muted_ink" : "border-rule text-muted_ink"
+            }`}>
+              <Disc3 className="w-7 h-7" strokeWidth={0.8} />
+            </div>
+            <p className={`font-mono text-[10px] uppercase tracking-[0.24em] mb-3 ${
+              voiceId === null ? "text-muted_ink" : "text-muted_ink"
+            }`}>
+              {voiceId === null ? "Default" : "Select"}
+            </p>
+            <p className="font-serif text-2xl leading-tight mb-1">None</p>
+            <p className="text-sm text-muted_ink mb-3">No character tint</p>
+            <p className="text-xs text-muted_ink/70 leading-relaxed">The AI will speak in its standard debate voice without any character flavor.</p>
+          </button>
         </div>
       </div>
 
