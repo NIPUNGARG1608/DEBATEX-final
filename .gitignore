@@ -69,8 +69,9 @@ agenthub/agents/youtube/db
 # MongoDB - local database files
 mongodb/
 
-# Root-level lock files (managed via frontend/)
-/package-lock.json
+# Lock files
+package-lock.json
+
 # Archive files and large assets
 **/*.zip
 **/*.tar.gz
@@ -94,8 +95,6 @@ credentials.json
 *.key
 .credentials
 
-# Allow .env.example files (they serve as templates)
+# Allow .env and .env.example for production deployment (contains public backend URL)
+!.env
 !.env.example
-
-# Allow frontend/.env for production deployment (contains public backend URL)
-!frontend/.env
