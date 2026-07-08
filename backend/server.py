@@ -54,7 +54,8 @@ if not JWT_SECRET or len(JWT_SECRET) < 32:
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
 groq_client: Optional[Groq] = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
-mongo = AsyncIOMotorClient(MONGO_URI)
+# Initialize MongoDB client (lazy connection - will connect on first use)
+mongo = AsyncIOMotorClient(MONGO_URI, serverSelectionTimeoutMS=5000)
 db = mongo[DB_NAME]
 
 app = FastAPI(title="DebateX API")
