@@ -61,7 +61,7 @@ app = FastAPI(title="DebateX API")
 # Add CORS middleware immediately after app initialization
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://nipungarg1608.github.io", "https://debatex-final-backend.onrender.com"],
+    allow_origins=["https://nipungarg1608.github.io"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
