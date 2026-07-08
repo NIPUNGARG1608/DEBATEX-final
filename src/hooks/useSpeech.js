@@ -17,6 +17,7 @@ export function useSpeechRecognition({ lang = "en-US", onFinal } = {}) {
   const [error, setError] = useState(null);
   const recognitionRef = useRef(null);
   const onFinalRef = useRef(onFinal);
+  const shouldRestartRef = useRef(false);
   onFinalRef.current = onFinal;
 
   // Check browser support once
@@ -28,6 +29,7 @@ export function useSpeechRecognition({ lang = "en-US", onFinal } = {}) {
   // Cleanup on unmount — abort any in-flight recognition
   useEffect(() => {
     return () => {
+      shouldRestartRef.current = false;
       if (recognitionRef.current) {
         try { recognitionRef.current.abort(); } catch (_) { /* ignore */ }
       }
@@ -36,6 +38,7 @@ export function useSpeechRecognition({ lang = "en-US", onFinal } = {}) {
 
   const start = useCallback(() => {
     setError(null);
+    shouldRestartRef.current = true;
 
     // Abort any previous recognition instance before creating a new one
     if (recognitionRef.current) {
@@ -70,15 +73,76 @@ export function useSpeechRecognition({ lang = "en-US", onFinal } = {}) {
     };
 
     rec.onend = () => {
-      setListening(false);
+      // In continuous mode, the recognition can end unexpectedly.
+      // If we should still be listening, try to restart.
+      if (shouldRestartRef.current) {
+        try {
+          rec.start();
+        } catch (e) {
+          // If restart fails, stop listening
+          setListening(false);
+          shouldRestartRef.current = false;
+        }
+      } else {
+        setListening(false);
+      }
     };
 
     rec.onerror = (event) => {
-      setListening(false);
       // "aborted" is expected when the user manually stops — don't surface it
-      if (event.error !== "aborted") {
-        setError(event.error);
+      if (event.error === "aborted") {
+        shouldRestartRef.current = false;
+        return;
       }
+      // "no-speech" is common and not critical - just log it
+      if (event.error === "no-speech") {
+        console.debug("Speech recognition: no speech detected");
+        return;
+      }
+      // "network" errors can be recovered from
+      if (event.error === "network" || event.error === "network-timeout") {
+        console.warn("Speech recognition network error, attempting restart...");
+        if (shouldRestartRef.current) {
+          try {
+            setTimeout(() => rec.start(), 1000);
+          } catch (e) {
+            setListening(false);
+            shouldRestartRef.current = false;
+          }
+        }
+        return;
+      }
+      // For other errors, stop and show the error
+      shouldRestartRef.current = false;
+      setListening(false);
+      setError(event.error);
+    };
+
+    // Handle when speech input ends (user stops talking)
+    rec.onspeechend = () => {
+      // In continuous mode, this doesn't stop recognition
+      // The user can continue speaking and it will pick up
+    };
+
+    // Handle when speech starts
+    rec.onspeechstart = () => {
+      // Clear any previous errors when speech actually starts
+      setError(null);
+    };
+
+    // Handle audio start (microphone activated)
+    rec.onaudiostart = () => {
+      // Audio stream is now active
+    };
+
+    // Handle when audio ends
+    rec.onaudioend = () => {
+      // Audio stream ended
+    };
+
+    // Handle no match (speech detected but not recognized)
+    rec.onnomatch = () => {
+      // Speech was detected but couldn't be recognized
     };
 
     recognitionRef.current = rec;
@@ -89,11 +153,13 @@ export function useSpeechRecognition({ lang = "en-US", onFinal } = {}) {
       setFinalText("");
       setInterim("");
     } catch (err) {
+      shouldRestartRef.current = false;
       setError(err.message || "Failed to start microphone. Check permissions.");
     }
   }, [lang]);
 
   const stop = useCallback(() => {
+    shouldRestartRef.current = false;
     if (!recognitionRef.current) return;
     try { recognitionRef.current.stop(); } catch (_) { /* ignore */ }
     setListening(false);
