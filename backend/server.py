@@ -61,10 +61,7 @@ app = FastAPI(title="DebateX API")
 # Add CORS middleware immediately after app initialization
 # Use CORS_ORIGINS env var (comma-separated) or default to the GitHub Pages origin
 cors_origins = os.environ.get("CORS_ORIGINS", "https://nipungarg1608.github.io")
-if cors_origins == "*":
-    allow_origins = ["*"]
-else:
-    allow_origins = [o.strip() for o in cors_origins.split(",") if o.strip()]
+allow_origins = [o.strip() for o in cors_origins.split(",") if o.strip()]
 
 app.add_middleware(
     CORSMiddleware,
