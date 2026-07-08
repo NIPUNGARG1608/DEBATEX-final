@@ -728,7 +728,7 @@ app.include_router(api)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
+    allow_origins=["https://nipungarg1608.github.io", "http://localhost:3000", "http://localhost:8000"] + os.environ.get("CORS_ORIGINS", "").split(",") if os.environ.get("CORS_ORIGINS") else ["https://nipungarg1608.github.io", "http://localhost:3000", "http://localhost:8000"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
