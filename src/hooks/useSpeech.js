@@ -18,6 +18,9 @@ export function useSpeechRecognition({ lang = "en-US", onFinal } = {}) {
   const recognitionRef = useRef(null);
   const onFinalRef = useRef(onFinal);
   const shouldRestartRef = useRef(false);
+  const restartTimeoutRef = useRef(null);
+  // Store the latest start function in a ref to avoid circular dependency
+  const startRef = useRef(null);
   onFinalRef.current = onFinal;
 
   // Check browser support once
@@ -30,26 +33,19 @@ export function useSpeechRecognition({ lang = "en-US", onFinal } = {}) {
   useEffect(() => {
     return () => {
       shouldRestartRef.current = false;
+      if (restartTimeoutRef.current) {
+        clearTimeout(restartTimeoutRef.current);
+      }
       if (recognitionRef.current) {
         try { recognitionRef.current.abort(); } catch (_) { /* ignore */ }
       }
     };
   }, []);
 
-  const start = useCallback(() => {
-    setError(null);
-    shouldRestartRef.current = true;
-
-    // Abort any previous recognition instance before creating a new one
-    if (recognitionRef.current) {
-      try { recognitionRef.current.abort(); } catch (_) { /* ignore */ }
-    }
-
+  // Create a recognition instance with all event handlers
+  const createRecognition = useCallback(() => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) {
-      setError("Speech recognition not supported in this browser.");
-      return;
-    }
+    if (!SR) return null;
 
     const rec = new SR();
     rec.continuous = true;
@@ -64,8 +60,12 @@ export function useSpeechRecognition({ lang = "en-US", onFinal } = {}) {
         if (e.results[i].isFinal) finalStr += t;
         else interimStr += t;
       }
-      if (interimStr) setInterim(interimStr);
+      if (interimStr) {
+        console.debug("Interim result:", interimStr);
+        setInterim(interimStr);
+      }
       if (finalStr) {
+        console.debug("Final result:", finalStr);
         setFinalText((prev) => (prev + " " + finalStr).trim());
         setInterim("");
         onFinalRef.current?.(finalStr.trim());
@@ -73,22 +73,27 @@ export function useSpeechRecognition({ lang = "en-US", onFinal } = {}) {
     };
 
     rec.onend = () => {
+      console.debug("Recognition ended, shouldRestart:", shouldRestartRef.current);
       // In continuous mode, the recognition can end unexpectedly.
-      // If we should still be listening, try to restart.
+      // If we should still be listening, create a new instance and restart.
       if (shouldRestartRef.current) {
-        try {
-          rec.start();
-        } catch (e) {
-          // If restart fails, stop listening
-          setListening(false);
-          shouldRestartRef.current = false;
+        // Clear any existing timeout
+        if (restartTimeoutRef.current) {
+          clearTimeout(restartTimeoutRef.current);
         }
+        // Use the startRef to get the latest start function
+        restartTimeoutRef.current = setTimeout(() => {
+          if (shouldRestartRef.current && startRef.current) {
+            startRef.current();
+          }
+        }, 100);
       } else {
         setListening(false);
       }
     };
 
     rec.onerror = (event) => {
+      console.warn("Speech recognition error:", event.error);
       // "aborted" is expected when the user manually stops — don't surface it
       if (event.error === "aborted") {
         shouldRestartRef.current = false;
@@ -103,12 +108,11 @@ export function useSpeechRecognition({ lang = "en-US", onFinal } = {}) {
       if (event.error === "network" || event.error === "network-timeout") {
         console.warn("Speech recognition network error, attempting restart...");
         if (shouldRestartRef.current) {
-          try {
-            setTimeout(() => rec.start(), 1000);
-          } catch (e) {
-            setListening(false);
-            shouldRestartRef.current = false;
-          }
+          restartTimeoutRef.current = setTimeout(() => {
+            if (startRef.current) {
+              startRef.current();
+            }
+          }, 1000);
         }
         return;
       }
@@ -120,30 +124,48 @@ export function useSpeechRecognition({ lang = "en-US", onFinal } = {}) {
 
     // Handle when speech input ends (user stops talking)
     rec.onspeechend = () => {
-      // In continuous mode, this doesn't stop recognition
-      // The user can continue speaking and it will pick up
+      console.debug("Speech ended");
     };
 
     // Handle when speech starts
     rec.onspeechstart = () => {
+      console.debug("Speech started");
       // Clear any previous errors when speech actually starts
       setError(null);
     };
 
     // Handle audio start (microphone activated)
     rec.onaudiostart = () => {
-      // Audio stream is now active
+      console.debug("Audio started");
     };
 
     // Handle when audio ends
     rec.onaudioend = () => {
-      // Audio stream ended
+      console.debug("Audio ended");
     };
 
     // Handle no match (speech detected but not recognized)
     rec.onnomatch = () => {
-      // Speech was detected but couldn't be recognized
+      console.debug("No match - speech not recognized");
     };
+
+    return rec;
+  }, [lang]);
+
+  const start = useCallback(() => {
+    setError(null);
+    shouldRestartRef.current = true;
+
+    // Abort any previous recognition instance before creating a new one
+    if (recognitionRef.current) {
+      try { recognitionRef.current.abort(); } catch (_) { /* ignore */ }
+    }
+
+    const rec = createRecognition();
+    if (!rec) {
+      setError("Speech recognition not supported in this browser.");
+      return;
+    }
 
     recognitionRef.current = rec;
 
@@ -153,13 +175,22 @@ export function useSpeechRecognition({ lang = "en-US", onFinal } = {}) {
       setFinalText("");
       setInterim("");
     } catch (err) {
+      console.error("Failed to start recognition:", err);
       shouldRestartRef.current = false;
       setError(err.message || "Failed to start microphone. Check permissions.");
     }
-  }, [lang]);
+  }, [createRecognition]);
+
+  // Keep startRef updated with the latest start function
+  useEffect(() => {
+    startRef.current = start;
+  }, [start]);
 
   const stop = useCallback(() => {
     shouldRestartRef.current = false;
+    if (restartTimeoutRef.current) {
+      clearTimeout(restartTimeoutRef.current);
+    }
     if (!recognitionRef.current) return;
     try { recognitionRef.current.stop(); } catch (_) { /* ignore */ }
     setListening(false);
