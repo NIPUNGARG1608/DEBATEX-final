@@ -26,7 +26,7 @@ sys.modules["motor"] = mock_motor
 sys.modules["motor.motor_asyncio"] = mock_motor_asyncio
 
 import os
-os.environ.setdefault("MONGO_URL", "mongodb://localhost:27017")
+os.environ.setdefault("MONGO_URI", "mongodb://localhost:27017")
 os.environ.setdefault("DB_NAME", "debatex_test")
 os.environ.setdefault("JWT_SECRET", "test-jwt-secret-key-for-unit-testing-32bytes")
 os.environ.setdefault("GROQ_API_KEY", "fake-test-key")
