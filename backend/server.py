@@ -36,8 +36,10 @@ load_dotenv(ROOT_DIR / ".env", override=True)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("debatex")
 
-# Support both MONGO_URI and MONGO_URL for compatibility with Render dashboard
-MONGO_URI = os.environ.get("MONGO_URI") or os.environ.get("MONGO_URL", "mongodb://localhost:27017")
+# MongoDB connection - uses MONGO_URI environment variable
+MONGO_URI = os.environ.get("MONGO_URI")
+if not MONGO_URI:
+    raise RuntimeError("MONGO_URI environment variable is not set. Please configure it in the Render dashboard.")
 DB_NAME = os.environ.get("DB_NAME", "debatex")
 JWT_SECRET = os.environ.get("JWT_SECRET", "")
 JWT_ALGO = "HS256"
@@ -54,8 +56,8 @@ if not JWT_SECRET or len(JWT_SECRET) < 32:
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
 groq_client: Optional[Groq] = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
-# Initialize MongoDB client (lazy connection - will connect on first use)
-mongo = AsyncIOMotorClient(MONGO_URI, serverSelectionTimeoutMS=5000)
+# Initialize MongoDB client with TLS settings for MongoDB Atlas
+mongo = AsyncIOMotorClient(MONGO_URI, tls=True, tlsAllowInvalidCertificates=False)
 db = mongo[DB_NAME]
 
 app = FastAPI(title="DebateX API")
