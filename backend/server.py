@@ -224,8 +224,17 @@ async def get_current_user(request: Request, creds: Optional[HTTPAuthorizationCr
     return user
 
 
-# For routes that need authentication, use get_current_user directly
-# The OPTIONS check is already handled in get_current_user
+class RequireAuth:
+    """Class-based dependency that enforces authentication for non-OPTIONS requests."""
+    async def __call__(self, request: Request, user: Optional[dict] = Depends(get_current_user)) -> dict:
+        if request.method == "OPTIONS":
+            return None  # Skip authentication for preflight requests
+        if user is None:
+            raise HTTPException(status_code=401, detail="Not authenticated")
+        return user
+
+
+require_auth = RequireAuth()
 
 
 # --------------------------------------------------------------------------- #
@@ -518,9 +527,7 @@ async def login(payload: UserLogin):
 
 
 @api.get("/auth/me", response_model=UserPublic)
-async def me(user=Depends(get_current_user)):
-    if user is None:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+async def me(user=Depends(require_auth)):
     return UserPublic(id=user["id"], email=user["email"], name=user["name"])
 
 
