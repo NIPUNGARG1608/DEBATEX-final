@@ -36,7 +36,8 @@ load_dotenv(ROOT_DIR / ".env", override=True)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("debatex")
 
-MONGO_URI = os.environ.get("MONGO_URI", "mongodb://localhost:27017")
+# Support both MONGO_URI and MONGO_URL for compatibility with Render dashboard
+MONGO_URI = os.environ.get("MONGO_URI") or os.environ.get("MONGO_URL", "mongodb://localhost:27017")
 DB_NAME = os.environ.get("DB_NAME", "debatex")
 JWT_SECRET = os.environ.get("JWT_SECRET", "")
 JWT_ALGO = "HS256"
