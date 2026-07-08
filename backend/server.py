@@ -36,7 +36,7 @@ load_dotenv(ROOT_DIR / ".env", override=True)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("debatex")
 
-MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
+MONGO_URI = os.environ.get("MONGO_URI", "mongodb://localhost:27017")
 DB_NAME = os.environ.get("DB_NAME", "debatex")
 JWT_SECRET = os.environ.get("JWT_SECRET", "")
 JWT_ALGO = "HS256"
@@ -53,7 +53,7 @@ if not JWT_SECRET or len(JWT_SECRET) < 32:
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
 groq_client: Optional[Groq] = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
-mongo = AsyncIOMotorClient(MONGO_URL)
+mongo = AsyncIOMotorClient(MONGO_URI)
 db = mongo[DB_NAME]
 
 app = FastAPI(title="DebateX API")
