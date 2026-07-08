@@ -7,7 +7,7 @@ for web-search-augmented responses), voice character profiles, and
 post-debate analysis. Text-to-speech is powered by Microsoft Edge-TTS
 (free, high-quality, human-like voices).
 """
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, status
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
@@ -202,8 +202,11 @@ def create_token(user_id: str) -> str:
     return pyjwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGO)
 
 
-async def current_user(creds: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> dict:
-    if not creds or not creds.credentials:
+async def get_current_user(request: Request, creds: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> Optional[dict]:
+    """Get current user, returning None for OPTIONS requests to allow CORS preflight."""
+    if request.method == "OPTIONS":
+        return None
+    if creds is None or creds.credentials is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
     try:
         payload = pyjwt.decode(creds.credentials, JWT_SECRET, algorithms=[JWT_ALGO])
@@ -214,6 +217,13 @@ async def current_user(creds: Optional[HTTPAuthorizationCredentials] = Depends(s
     user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+    return user
+
+
+def require_auth(user: Optional[dict] = Depends(get_current_user)) -> dict:
+    """Dependency wrapper that enforces authentication for non-OPTIONS requests."""
+    if user is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
     return user
 
 
@@ -507,7 +517,7 @@ async def login(payload: UserLogin):
 
 
 @api.get("/auth/me", response_model=UserPublic)
-async def me(user=Depends(current_user)):
+async def me(user=Depends(require_auth)):
     return UserPublic(id=user["id"], email=user["email"], name=user["name"])
 
 
@@ -515,13 +525,13 @@ async def me(user=Depends(current_user)):
 # Routes: Favorite topics
 # --------------------------------------------------------------------------- #
 @api.get("/favorites")
-async def get_favorites(user=Depends(current_user)):
+async def get_favorites(user=Depends(require_auth)):
     doc = await db.users.find_one({"id": user["id"]}, {"_id": 0, "favorite_topics": 1})
     return {"favorites": doc.get("favorite_topics", [])}
 
 
 @api.post("/favorites")
-async def add_favorite(payload: FavoriteTopic, user=Depends(current_user)):
+async def add_favorite(payload: FavoriteTopic, user=Depends(require_auth)):
     topic = payload.topic.strip()
     if not topic:
         raise HTTPException(status_code=400, detail="Topic required")
@@ -531,7 +541,7 @@ async def add_favorite(payload: FavoriteTopic, user=Depends(current_user)):
 
 
 @api.delete("/favorites")
-async def remove_favorite(payload: FavoriteTopic, user=Depends(current_user)):
+async def remove_favorite(payload: FavoriteTopic, user=Depends(require_auth)):
     await db.users.update_one({"id": user["id"]}, {"$pull": {"favorite_topics": payload.topic}})
     doc = await db.users.find_one({"id": user["id"]}, {"_id": 0, "favorite_topics": 1})
     return {"favorites": doc.get("favorite_topics", [])}
@@ -546,7 +556,7 @@ def _debate_doc_to_out(doc: dict) -> dict:
 
 
 @api.post("/debates", response_model=DebateOut)
-async def create_debate(payload: DebateCreate, user=Depends(current_user)):
+async def create_debate(payload: DebateCreate, user=Depends(require_auth)):
     if payload.mode not in DEBATE_MODES:
         raise HTTPException(status_code=400, detail="Invalid mode")
 
@@ -592,7 +602,7 @@ async def create_debate(payload: DebateCreate, user=Depends(current_user)):
 
 
 @api.get("/debates", response_model=List[DebateOut])
-async def list_debates(user=Depends(current_user), search: Optional[str] = None, bookmarked: Optional[bool] = None):
+async def list_debates(user=Depends(require_auth), search: Optional[str] = None, bookmarked: Optional[bool] = None):
     query: dict = {"user_id": user["id"]}
     if bookmarked is True:
         query["bookmarked"] = True
@@ -603,7 +613,7 @@ async def list_debates(user=Depends(current_user), search: Optional[str] = None,
 
 
 @api.get("/debates/{debate_id}", response_model=DebateOut)
-async def get_debate(debate_id: str, user=Depends(current_user)):
+async def get_debate(debate_id: str, user=Depends(require_auth)):
     doc = await db.debates.find_one({"id": debate_id, "user_id": user["id"]}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Debate not found")
@@ -611,7 +621,7 @@ async def get_debate(debate_id: str, user=Depends(current_user)):
 
 
 @api.post("/debates/turn", response_model=DebateOut)
-async def debate_turn(payload: DebateTurn, user=Depends(current_user)):
+async def debate_turn(payload: DebateTurn, user=Depends(require_auth)):
     doc = await db.debates.find_one({"id": payload.debate_id, "user_id": user["id"]}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Debate not found")
@@ -637,7 +647,7 @@ async def debate_turn(payload: DebateTurn, user=Depends(current_user)):
 
 
 @api.post("/debates/{debate_id}/report", response_model=DebateOut)
-async def finalize_debate(debate_id: str, user=Depends(current_user)):
+async def finalize_debate(debate_id: str, user=Depends(require_auth)):
     doc = await db.debates.find_one({"id": debate_id, "user_id": user["id"]}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Debate not found")
@@ -666,7 +676,7 @@ async def finalize_debate(debate_id: str, user=Depends(current_user)):
 
 
 @api.patch("/debates/{debate_id}/bookmark", response_model=DebateOut)
-async def toggle_bookmark(debate_id: str, payload: BookmarkToggle, user=Depends(current_user)):
+async def toggle_bookmark(debate_id: str, payload: BookmarkToggle, user=Depends(require_auth)):
     result = await db.debates.update_one(
         {"id": debate_id, "user_id": user["id"]},
         {"$set": {"bookmarked": payload.bookmarked}},
@@ -678,7 +688,7 @@ async def toggle_bookmark(debate_id: str, payload: BookmarkToggle, user=Depends(
 
 
 @api.delete("/debates/{debate_id}")
-async def delete_debate(debate_id: str, user=Depends(current_user)):
+async def delete_debate(debate_id: str, user=Depends(require_auth)):
     result = await db.debates.delete_one({"id": debate_id, "user_id": user["id"]})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Debate not found")
@@ -689,7 +699,7 @@ async def delete_debate(debate_id: str, user=Depends(current_user)):
 # Routes: Dashboard aggregates
 # --------------------------------------------------------------------------- #
 @api.get("/dashboard")
-async def dashboard(user=Depends(current_user)):
+async def dashboard(user=Depends(require_auth)):
     debates = await db.debates.find({"user_id": user["id"]}, {"_id": 0}).to_list(1000)
 
     total = len(debates)
