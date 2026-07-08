@@ -59,13 +59,10 @@ db = mongo[DB_NAME]
 app = FastAPI(title="DebateX API")
 
 # Add CORS middleware immediately after app initialization
-# Use CORS_ORIGINS env var (comma-separated) or default to the GitHub Pages origin
-cors_origins = os.environ.get("CORS_ORIGINS", "https://nipungarg1608.github.io")
-allow_origins = [o.strip() for o in cors_origins.split(",") if o.strip()]
-
+# Hardcoded to the GitHub Pages origin to ensure CORS works
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allow_origins,
+    allow_origins=["https://nipungarg1608.github.io"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
