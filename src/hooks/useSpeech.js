@@ -322,6 +322,12 @@ export function useGroqSpeechRecognition({
       window.MediaRecorder
     );
     setSupported(isSupported);
+    console.log("[STT] Browser support check:", {
+      mediaDevices: !!navigator.mediaDevices,
+      getUserMedia: !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia),
+      mediaRecorder: !!window.MediaRecorder,
+      isSupported
+    });
   }, []);
 
   // Cleanup on unmount
@@ -337,8 +343,11 @@ export function useGroqSpeechRecognition({
   }, []);
 
   const start = useCallback(async () => {
+    console.log("[STT] start() called, supported:", supported);
+    
     if (!supported) {
       const err = "Audio recording not supported in this browser.";
+      console.error("[STT] Recording not supported:", err);
       setError(err);
       onErrorRef.current?.(err);
       return;
@@ -346,9 +355,11 @@ export function useGroqSpeechRecognition({
 
     setError(null);
     audioChunksRef.current = [];
+    console.log("[STT] Audio chunks reset, starting recording...");
 
     try {
       // Request microphone access
+      console.log("[STT] Requesting microphone access...");
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: {
           echoCancellation: true,
@@ -357,15 +368,30 @@ export function useGroqSpeechRecognition({
         } 
       });
       streamRef.current = stream;
+      console.log("[STT] Microphone access granted, stream active:", stream.active);
 
       // Create MediaRecorder with webm format (widely supported)
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: 'audio/webm;codecs=opus',
-      });
+      // Try different mime types for browser compatibility
+      let mimeType = 'audio/webm;codecs=opus';
+      if (!MediaRecorder.isTypeSupported(mimeType)) {
+        console.warn("[STT] Preferred mime type not supported, trying alternatives...");
+        if (MediaRecorder.isTypeSupported('audio/webm')) {
+          mimeType = 'audio/webm';
+        } else if (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) {
+          mimeType = 'audio/ogg;codecs=opus';
+        } else {
+          console.warn("[STT] Using default mime type");
+          mimeType = undefined;
+        }
+      }
+      console.log("[STT] Using mime type:", mimeType);
+
+      const mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       mediaRecorderRef.current = mediaRecorder;
 
       // Handle data available
       mediaRecorder.ondataavailable = (event) => {
+        console.log("[STT] ondataavailable event, size:", event.data.size);
         if (event.data.size > 0) {
           audioChunksRef.current.push(event.data);
         }
@@ -373,6 +399,7 @@ export function useGroqSpeechRecognition({
 
       // Handle recording stop
       mediaRecorder.onstop = async () => {
+        console.log("[STT] onstop triggered, chunks collected:", audioChunksRef.current.length);
         setRecording(false);
         
         // Stop all tracks to release microphone
@@ -382,39 +409,73 @@ export function useGroqSpeechRecognition({
         }
 
         // Create blob from recorded chunks
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType || 'audio/webm' });
+        console.log("[STT] Audio blob created:", {
+          size: audioBlob.size,
+          type: audioBlob.type,
+          chunks: audioChunksRef.current.length
+        });
         
         // Check file size (25MB limit)
+        if (audioBlob.size === 0) {
+          const err = "Recording produced no audio data. Please try again.";
+          console.error("[STT] Empty audio blob detected");
+          setError(err);
+          onErrorRef.current?.(err);
+          return;
+        }
+        
         if (audioBlob.size > 25 * 1024 * 1024) {
           const err = "Recording too long. Please keep it under 30 seconds.";
+          console.error("[STT] Audio blob too large:", audioBlob.size);
           setError(err);
           onErrorRef.current?.(err);
           return;
         }
 
+        // Create a proper File object with filename and mime type
+        const file = new File([audioBlob], 'recording.webm', { 
+          type: mimeType || 'audio/webm',
+          lastModified: Date.now()
+        });
+        console.log("[STT] File object created:", {
+          name: file.name,
+          size: file.size,
+          type: file.type
+        });
+
         // Send to backend for transcription
         setTranscribing(true);
         try {
           const formData = new FormData();
-          formData.append('file', audioBlob, 'recording.webm');
+          formData.append('file', file, 'recording.webm');
+          console.log("[STT] FormData created, sending to backend...");
 
-          const response = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/stt`, {
+          const backendUrl = process.env.REACT_APP_BACKEND_URL;
+          console.log("[STT] Backend URL:", backendUrl);
+          
+          const response = await fetch(`${backendUrl}/api/stt`, {
             method: 'POST',
             body: formData,
-            headers: {
-              'Authorization': `Bearer ${localStorage.getItem('debatex_token') || ''}`,
-            },
+          });
+
+          console.log("[STT] Response received:", {
+            status: response.status,
+            ok: response.ok,
+            statusText: response.statusText
           });
 
           if (!response.ok) {
             const errorData = await response.json().catch(() => ({}));
+            console.error("[STT] API error response:", errorData);
             throw new Error(errorData.detail || `STT failed: ${response.status}`);
           }
 
           const data = await response.json();
+          console.log("[STT] Transcription result:", data);
           onTranscriptionRef.current?.(data.text);
         } catch (err) {
-          console.error("STT error:", err);
+          console.error("[STT] Transcription error:", err);
           const errorMsg = err.message || "Failed to transcribe audio";
           setError(errorMsg);
           onErrorRef.current?.(errorMsg);
@@ -425,7 +486,7 @@ export function useGroqSpeechRecognition({
 
       // Handle errors
       mediaRecorder.onerror = (event) => {
-        console.error("MediaRecorder error:", event.error);
+        console.error("[STT] MediaRecorder error:", event.error);
         const err = event.error?.message || "Recording error";
         setError(err);
         setRecording(false);
@@ -433,18 +494,21 @@ export function useGroqSpeechRecognition({
       };
 
       // Start recording
+      console.log("[STT] Starting MediaRecorder...");
       mediaRecorder.start(100); // Collect data every 100ms
       setRecording(true);
+      console.log("[STT] MediaRecorder started, recording state:", true);
 
       // Auto-stop after max duration
       setTimeout(() => {
         if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+          console.log("[STT] Auto-stopping after max duration");
           mediaRecorderRef.current.stop();
         }
       }, maxDuration);
 
     } catch (err) {
-      console.error("Failed to start recording:", err);
+      console.error("[STT] Failed to start recording:", err);
       if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
         const errMsg = "Microphone permission denied. Please allow microphone access.";
         setError(errMsg);
@@ -458,6 +522,7 @@ export function useGroqSpeechRecognition({
   }, [supported, maxDuration]);
 
   const stop = useCallback(() => {
+    console.log("[STT] stop() called, recorder state:", mediaRecorderRef.current?.state);
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
       mediaRecorderRef.current.stop();
     }

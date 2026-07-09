@@ -473,6 +473,8 @@ async def speech_to_text(request: Request):
     
     # Check content type for multipart form data
     content_type = request.headers.get("content-type", "")
+    logger.info(f"[STT] Request received, content-type: {content_type}")
+    
     if not content_type.startswith("multipart/form-data"):
         raise HTTPException(
             status_code=400,
@@ -482,12 +484,14 @@ async def speech_to_text(request: Request):
     try:
         # Parse the multipart form data
         form = await request.form()
+        logger.info(f"[STT] Form parsed, keys: {list(form.keys())}")
         
         # Get the audio file
         if "file" not in form:
             raise HTTPException(status_code=400, detail="No audio file provided. Use 'file' as the form field name.")
         
         audio_file = form["file"]
+        logger.info(f"[STT] Audio file received: filename={audio_file.filename}, content_type={audio_file.content_type}")
         
         # Check file size (25MB limit for Groq free tier)
         file_size = 0
@@ -501,11 +505,14 @@ async def speech_to_text(request: Request):
                     detail="Audio file exceeds 25MB limit. Please record a shorter clip."
                 )
         
+        logger.info(f"[STT] Audio bytes collected: {file_size} bytes")
+        
         if file_size == 0:
             raise HTTPException(status_code=400, detail="Audio file is empty")
         
         # Get filename and determine extension
         filename = audio_file.filename or "audio.webm"
+        logger.info(f"[STT] Calling Groq Whisper API with file: {filename}, size: {file_size}")
         
         # Call Groq Whisper API
         transcription = groq_client.audio.transcriptions.create(
@@ -514,6 +521,8 @@ async def speech_to_text(request: Request):
             response_format="json",
             language="en",  # English, can be made configurable
         )
+        
+        logger.info(f"[STT] Groq Whisper response: text='{transcription.text}', confidence={getattr(transcription, 'confidence', None)}")
         
         return {"text": transcription.text, "confidence": getattr(transcription, "confidence", None)}
         
