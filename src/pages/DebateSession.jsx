@@ -47,8 +47,7 @@ export default function DebateSession() {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [debate?.messages?.length, interim]);
 
-  // Use a ref to track the latest finalText so we can read it immediately
-  // after stop() without waiting for a React re-render.
+  // Ref to track the latest finalText for immediate access after stop()
   const finalTextRef = useRef("");
   useEffect(() => { finalTextRef.current = finalText; }, [finalText]);
 

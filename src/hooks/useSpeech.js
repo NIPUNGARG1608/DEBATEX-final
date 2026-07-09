@@ -18,8 +18,6 @@ export function useSpeechRecognition({ lang = "en-US", onFinal } = {}) {
   const [error, setError] = useState(null);
   const recognitionRef = useRef(null);
   const onFinalRef = useRef(onFinal);
-  const finalTextRef = useRef("");
-  const interimRef = useRef("");
   const shouldRestartRef = useRef(false);
   const restartTimeoutRef = useRef(null);
   // Track if we've received any speech to detect silent failures
@@ -27,12 +25,6 @@ export function useSpeechRecognition({ lang = "en-US", onFinal } = {}) {
   // Track if recognition is actually running (not just in restart delay)
   const isRunningRef = useRef(false);
   onFinalRef.current = onFinal;
-
-  // Keep refs updated
-  useEffect(() => {
-    finalTextRef.current = finalText;
-    interimRef.current = interim;
-  }, [finalText, interim]);
 
   // Check browser support once
   useEffect(() => {
@@ -273,8 +265,9 @@ export function useSpeechRecognition({ lang = "en-US", onFinal } = {}) {
 
   // Get the current captured text (combines interim and final)
   const getCapturedText = useCallback(() => {
-    return (finalTextRef.current || "").trim() || interim.trim();
-  }, [interim]);
+    // Return finalText if available, otherwise interim
+    return (finalText || "").trim() || (interim || "").trim();
+  }, [finalText, interim]);
 
   return { supported, listening, starting, interim, finalText, error, start, stop, setFinalText, getCapturedText };
 }
