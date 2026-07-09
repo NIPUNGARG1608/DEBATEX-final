@@ -17,6 +17,7 @@ export default function DebateSession() {
   const [error, setError] = useState(null);
   const [transcribedText, setTranscribedText] = useState("");
   const scrollRef = useRef(null);
+  const isPointerDownRef = useRef(false);
 
   // Use Groq Whisper STT (more reliable than Web Speech API)
   const { 
@@ -105,28 +106,33 @@ export default function DebateSession() {
     if (speaking) cancelSpeak();
     // Start recording only if not already recording
     if (!recording && !transcribing) {
+      isPointerDownRef.current = true;
       startRecording();
     }
   };
 
   // Push-to-talk: stop recording and send when button is released
   const handlePointerUp = () => {
-    if (recording) {
+    if (isPointerDownRef.current && recording) {
+      isPointerDownRef.current = false;
       stopRecording();
       // The transcription will be handled by the onTranscription callback
     }
   };
 
-  // Keep click handler for accessibility (space/enter key activation)
+  // Handle click for accessibility (space/enter key activation)
+  // This is for keyboard users or quick taps
   const handleMicClick = () => {
     if (!sttSupported) {
       toast.error("Voice input not supported in this browser. Use the text field.");
       return;
     }
-    // For click activation, toggle behavior
+    // Only handle click if not in a pointer sequence (push-to-talk)
+    // If we're recording, stop and transcribe
     if (recording) {
       stopRecording();
-    } else {
+    } else if (!transcribing) {
+      // Start recording for click/tap
       if (speaking) cancelSpeak();
       startRecording();
     }

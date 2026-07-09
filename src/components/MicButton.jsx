@@ -5,12 +5,14 @@ import { Mic, MicOff } from "lucide-react";
  * active (signal-red glow + ripple rings).
  * 
  * Supports push-to-talk: hold to speak, release to send.
+ * For accessibility, also supports click/tap to toggle.
  */
 export default function MicButton({ 
   active, 
-  onClick, 
+  onClick,
   onPointerDown,
   onPointerUp,
+  onPointerLeave,
   size = "lg", 
   disabled = false, 
   testId = "mic-button" 
@@ -40,14 +42,31 @@ export default function MicButton({
     }
   };
 
+  const handlePointerCancel = (e) => {
+    if (disabled) return;
+    e.preventDefault();
+    onPointerUp?.(e);
+  };
+
+  // Handle click for accessibility (space/enter key activation)
+  // Only trigger onClick if not actively recording (to avoid double-trigger)
+  const handleClick = (e) => {
+    if (disabled) return;
+    // Don't trigger click if we're in the middle of a pointer sequence
+    // (pointer down -> pointer up will handle it)
+    if (!active) {
+      onClick?.(e);
+    }
+  };
+
   return (
     <button
       data-testid={testId}
-      onClick={onClick}
+      onClick={handleClick}
       onPointerDown={handlePointerDown}
       onPointerUp={handlePointerUp}
       onPointerLeave={handlePointerLeave}
-      onPointerCancel={handlePointerUp}
+      onPointerCancel={handlePointerCancel}
       disabled={disabled}
       className={`relative flex items-center justify-center rounded-full transition-all duration-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-signal ${dim} ${
         active
