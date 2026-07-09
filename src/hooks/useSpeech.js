@@ -259,7 +259,8 @@ export function useSpeechRecognition({ lang = "en-US", onFinal } = {}) {
     }
     if (!recognitionRef.current) return;
     try { recognitionRef.current.stop(); } catch (_) { /* ignore */ }
-    setListening(false);
+    // Don't set listening to false here - let onend handle it
+    // This ensures we capture any final results that come after stop()
   }, []);
 
   return { supported, listening, starting, interim, finalText, error, start, stop, setFinalText };

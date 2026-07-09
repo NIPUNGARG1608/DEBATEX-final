@@ -99,10 +99,14 @@ export default function DebateSession() {
   const handlePointerUp = () => {
     if (listening || starting) {
       stop();
-      // Read from the ref to avoid stale closure — the last onresult may
-      // have fired after the current render's finalText was captured.
-      const captured = (finalTextRef.current || "").trim();
-      if (captured) submitTurn(captured);
+      // Wait a small delay for any final results to be processed
+      // The onend handler will set listening to false after this
+      setTimeout(() => {
+        // Read from the ref to avoid stale closure — the last onresult may
+        // have fired after the current render's finalText was captured.
+        const captured = (finalTextRef.current || "").trim();
+        if (captured) submitTurn(captured);
+      }, 300);
     }
   };
 
@@ -115,8 +119,11 @@ export default function DebateSession() {
     // For click activation, toggle behavior
     if (listening || starting) {
       stop();
-      const captured = (finalTextRef.current || "").trim();
-      if (captured) submitTurn(captured);
+      // Wait for final results to be processed
+      setTimeout(() => {
+        const captured = (finalTextRef.current || "").trim();
+        if (captured) submitTurn(captured);
+      }, 300);
     } else {
       if (speaking) cancelSpeak();
       start();
@@ -223,7 +230,7 @@ export default function DebateSession() {
         )}
       </div>
 
-      {/* Mic & controls */}
+       {/* Mic & controls */}
       <div className="flex flex-col items-center gap-6 mb-8">
         <MicButton 
           active={listening || starting} 
@@ -257,6 +264,16 @@ export default function DebateSession() {
           </button>
         )}
       </div>
+
+      {/* Live speech preview (shows what's being captured) */}
+      {listening && (
+        <div className="mb-6 max-w-2xl mx-auto">
+          <p className="font-mono text-[10px] uppercase tracking-[0.28em] text-signal mb-2">You're saying:</p>
+          <p className="font-serif text-lg text-parchment bg-elevated border border-rule rounded-sm px-4 py-3 min-h-[60px]">
+            {interim || finalText || "…"}
+          </p>
+        </div>
+      )}
 
       {/* Text fallback */}
       <form
