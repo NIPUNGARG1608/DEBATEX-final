@@ -17,7 +17,7 @@ export default function DebateSession() {
   const [error, setError] = useState(null);
   const scrollRef = useRef(null);
 
-  const { supported: sttSupported, listening, starting, interim, finalText, error: sttError, start, stop, setFinalText } =
+  const { supported: sttSupported, listening, starting, interim, finalText, error: sttError, start, stop, setFinalText, getCapturedText } =
     useSpeechRecognition({});
   const { supported: ttsSupported, speaking, loading, error: ttsError, speak, cancel: cancelSpeak } = useEdgeSpeechSynthesis();
 
@@ -102,9 +102,8 @@ export default function DebateSession() {
       // Wait a small delay for any final results to be processed
       // The onend handler will set listening to false after this
       setTimeout(() => {
-        // Read from the ref to avoid stale closure — the last onresult may
-        // have fired after the current render's finalText was captured.
-        const captured = (finalTextRef.current || "").trim();
+        // Use getCapturedText to get the best available text (final or interim)
+        const captured = getCapturedText();
         if (captured) submitTurn(captured);
       }, 300);
     }
@@ -121,7 +120,7 @@ export default function DebateSession() {
       stop();
       // Wait for final results to be processed
       setTimeout(() => {
-        const captured = (finalTextRef.current || "").trim();
+        const captured = getCapturedText();
         if (captured) submitTurn(captured);
       }, 300);
     } else {
