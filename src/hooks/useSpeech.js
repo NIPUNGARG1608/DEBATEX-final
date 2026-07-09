@@ -12,6 +12,7 @@ import api from "@/lib/api";
 export function useSpeechRecognition({ lang = "en-US", onFinal } = {}) {
   const [supported, setSupported] = useState(false);
   const [listening, setListening] = useState(false);
+  const [starting, setStarting] = useState(false);
   const [interim, setInterim] = useState("");
   const [finalText, setFinalText] = useState("");
   const [error, setError] = useState(null);
@@ -19,8 +20,10 @@ export function useSpeechRecognition({ lang = "en-US", onFinal } = {}) {
   const onFinalRef = useRef(onFinal);
   const shouldRestartRef = useRef(false);
   const restartTimeoutRef = useRef(null);
-  // Store the latest start function in a ref to avoid circular dependency
-  const startRef = useRef(null);
+  // Track if we've received any speech to detect silent failures
+  const hasSpeechRef = useRef(false);
+  // Track if recognition is actually running (not just in restart delay)
+  const isRunningRef = useRef(false);
   onFinalRef.current = onFinal;
 
   // Check browser support once
@@ -33,6 +36,7 @@ export function useSpeechRecognition({ lang = "en-US", onFinal } = {}) {
   useEffect(() => {
     return () => {
       shouldRestartRef.current = false;
+      isRunningRef.current = false;
       if (restartTimeoutRef.current) {
         clearTimeout(restartTimeoutRef.current);
       }
@@ -63,30 +67,55 @@ export function useSpeechRecognition({ lang = "en-US", onFinal } = {}) {
       if (interimStr) {
         console.debug("Interim result:", interimStr);
         setInterim(interimStr);
+        hasSpeechRef.current = true;
       }
       if (finalStr) {
         console.debug("Final result:", finalStr);
         setFinalText((prev) => (prev + " " + finalStr).trim());
         setInterim("");
         onFinalRef.current?.(finalStr.trim());
+        hasSpeechRef.current = true;
       }
     };
 
     rec.onend = () => {
-      console.debug("Recognition ended, shouldRestart:", shouldRestartRef.current);
+      console.debug("Recognition ended, shouldRestart:", shouldRestartRef.current, "hasSpeech:", hasSpeechRef.current, "isRunning:", isRunningRef.current);
+      isRunningRef.current = false;
+      setStarting(false);
+      
       // In continuous mode, the recognition can end unexpectedly.
       // If we should still be listening, create a new instance and restart.
       if (shouldRestartRef.current) {
-        // Clear any existing timeout
+        // Only restart if we haven't received any speech (to avoid interrupting user)
+        // or if the recognition ended unexpectedly
         if (restartTimeoutRef.current) {
           clearTimeout(restartTimeoutRef.current);
         }
-        // Use the startRef to get the latest start function
+        // Use a longer delay to avoid rapid restart loops
         restartTimeoutRef.current = setTimeout(() => {
-          if (shouldRestartRef.current && startRef.current) {
-            startRef.current();
+          if (shouldRestartRef.current && !hasSpeechRef.current) {
+            // Create a fresh instance
+            const newRec = createRecognition();
+            if (newRec) {
+              recognitionRef.current = newRec;
+              try {
+                newRec.start();
+                isRunningRef.current = true;
+                setStarting(true);
+                setListening(true);
+                hasSpeechRef.current = false;
+              } catch (e) {
+                console.error("Failed to restart recognition:", e);
+                setListening(false);
+                setStarting(false);
+                shouldRestartRef.current = false;
+              }
+            }
+          } else {
+            // Either not restarting or we have speech - stop listening
+            setListening(false);
           }
-        }, 100);
+        }, 500);
       } else {
         setListening(false);
       }
@@ -94,14 +123,18 @@ export function useSpeechRecognition({ lang = "en-US", onFinal } = {}) {
 
     rec.onerror = (event) => {
       console.warn("Speech recognition error:", event.error);
+      setStarting(false);
       // "aborted" is expected when the user manually stops — don't surface it
       if (event.error === "aborted") {
         shouldRestartRef.current = false;
+        isRunningRef.current = false;
+        setListening(false);
         return;
       }
       // "no-speech" is common and not critical - just log it
       if (event.error === "no-speech") {
         console.debug("Speech recognition: no speech detected");
+        // Don't stop listening on no-speech - let it continue
         return;
       }
       // "network" errors can be recovered from
@@ -109,8 +142,24 @@ export function useSpeechRecognition({ lang = "en-US", onFinal } = {}) {
         console.warn("Speech recognition network error, attempting restart...");
         if (shouldRestartRef.current) {
           restartTimeoutRef.current = setTimeout(() => {
-            if (startRef.current) {
-              startRef.current();
+            if (shouldRestartRef.current && !hasSpeechRef.current) {
+              const newRec = createRecognition();
+              if (newRec) {
+                recognitionRef.current = newRec;
+                try {
+                  newRec.start();
+                  isRunningRef.current = true;
+                  setStarting(true);
+                  setListening(true);
+                  hasSpeechRef.current = false;
+                } catch (e) {
+                  setListening(false);
+                  setStarting(false);
+                  shouldRestartRef.current = false;
+                }
+              }
+            } else {
+              setListening(false);
             }
           }, 1000);
         }
@@ -118,6 +167,7 @@ export function useSpeechRecognition({ lang = "en-US", onFinal } = {}) {
       }
       // For other errors, stop and show the error
       shouldRestartRef.current = false;
+      isRunningRef.current = false;
       setListening(false);
       setError(event.error);
     };
@@ -132,11 +182,15 @@ export function useSpeechRecognition({ lang = "en-US", onFinal } = {}) {
       console.debug("Speech started");
       // Clear any previous errors when speech actually starts
       setError(null);
+      hasSpeechRef.current = true;
     };
 
     // Handle audio start (microphone activated)
     rec.onaudiostart = () => {
-      console.debug("Audio started");
+      console.debug("Audio started - mic is active");
+      isRunningRef.current = true;
+      setStarting(false);
+      setListening(true);
     };
 
     // Handle when audio ends
@@ -149,12 +203,25 @@ export function useSpeechRecognition({ lang = "en-US", onFinal } = {}) {
       console.debug("No match - speech not recognized");
     };
 
+    // Handle sound start (for Chrome)
+    rec.onsoundstart = () => {
+      console.debug("Sound detected");
+    };
+
+    // Handle sound end
+    rec.onsoundend = () => {
+      console.debug("Sound ended");
+    };
+
     return rec;
   }, [lang]);
 
   const start = useCallback(() => {
     setError(null);
     shouldRestartRef.current = true;
+    hasSpeechRef.current = false;
+    isRunningRef.current = false;
+    setStarting(true);
 
     // Abort any previous recognition instance before creating a new one
     if (recognitionRef.current) {
@@ -164,6 +231,7 @@ export function useSpeechRecognition({ lang = "en-US", onFinal } = {}) {
     const rec = createRecognition();
     if (!rec) {
       setError("Speech recognition not supported in this browser.");
+      setStarting(false);
       return;
     }
 
@@ -171,23 +239,21 @@ export function useSpeechRecognition({ lang = "en-US", onFinal } = {}) {
 
     try {
       rec.start();
-      setListening(true);
-      setFinalText("");
-      setInterim("");
+      // Don't set listening to true yet - wait for onaudiostart
+      // This ensures the UI only shows active when mic is actually working
     } catch (err) {
       console.error("Failed to start recognition:", err);
       shouldRestartRef.current = false;
+      isRunningRef.current = false;
+      setStarting(false);
       setError(err.message || "Failed to start microphone. Check permissions.");
     }
   }, [createRecognition]);
 
-  // Keep startRef updated with the latest start function
-  useEffect(() => {
-    startRef.current = start;
-  }, [start]);
-
   const stop = useCallback(() => {
     shouldRestartRef.current = false;
+    isRunningRef.current = false;
+    setStarting(false);
     if (restartTimeoutRef.current) {
       clearTimeout(restartTimeoutRef.current);
     }
@@ -196,7 +262,7 @@ export function useSpeechRecognition({ lang = "en-US", onFinal } = {}) {
     setListening(false);
   }, []);
 
-  return { supported, listening, interim, finalText, error, start, stop, setFinalText };
+  return { supported, listening, starting, interim, finalText, error, start, stop, setFinalText };
 }
 
 /**
@@ -207,6 +273,8 @@ export function useSpeechRecognition({ lang = "en-US", onFinal } = {}) {
 export function useEdgeSpeechSynthesis() {
   const [speaking, setSpeaking] = useState(false);
   const [supported] = useState(true); // Always supported since it uses HTTP audio
+  const [loading, setLoading] = useState(false);
+  const [ttsError, setTtsError] = useState(null);
   const audioRef = useRef(null);
   const abortRef = useRef(false);
 
@@ -221,7 +289,7 @@ export function useEdgeSpeechSynthesis() {
     };
   }, []);
 
-  const speak = useCallback((text, { voiceCharacter, onEnd } = {}) => {
+  const speak = useCallback((text, { voiceCharacter, onEnd, onError } = {}) => {
     if (!text || !text.trim()) return;
 
     // Cancel any ongoing speech
@@ -231,11 +299,8 @@ export function useEdgeSpeechSynthesis() {
     }
     abortRef.current = false;
     setSpeaking(true);
-
-    // Build the request URL with query params so we can stream the response as audio
-    const params = new URLSearchParams();
-    // We use POST with JSON body, but we'll create a Blob URL approach instead
-    // Use fetch to the backend TTS endpoint with streaming
+    setLoading(true);
+    setTtsError(null);
 
     const controller = new AbortController();
 
@@ -251,35 +316,52 @@ export function useEdgeSpeechSynthesis() {
 
         if (abortRef.current) return;
 
+        setLoading(false);
+        
         const blob = response.data;
         const url = URL.createObjectURL(blob);
         const audio = new Audio(url);
         audioRef.current = audio;
 
+        // Handle autoplay - need user interaction for audio to play
+        const playPromise = audio.play().catch(err => {
+          console.error("Audio play failed (likely autoplay policy):", err);
+          if (err.name === 'NotAllowedError') {
+            setTtsError("Click to enable audio playback");
+          }
+          throw err;
+        });
+
         audio.onended = () => {
           URL.revokeObjectURL(url);
           setSpeaking(false);
+          setLoading(false);
           audioRef.current = null;
           onEnd?.();
         };
 
-        audio.onerror = () => {
+        audio.onerror = (e) => {
+          console.error("Audio playback error:", e);
           URL.revokeObjectURL(url);
           setSpeaking(false);
+          setLoading(false);
           audioRef.current = null;
+          onError?.(e);
           onEnd?.();
         };
 
-        await audio.play();
+        await playPromise;
       } catch (err) {
         if (err?.code === 20 /* ABORT_ERR */ || abortRef.current) return;
         console.error("Edge-TTS playback error:", err);
         setSpeaking(false);
+        setLoading(false);
+        onError?.(err);
         onEnd?.();
       }
     })();
 
-    // Store abort function
+    // Return abort function
     return () => {
       controller.abort();
     };
@@ -292,7 +374,9 @@ export function useEdgeSpeechSynthesis() {
       audioRef.current = null;
     }
     setSpeaking(false);
+    setLoading(false);
+    setTtsError(null);
   }, []);
 
-  return { supported, speaking, speak, cancel };
+  return { supported, speaking, loading, error: ttsError, speak, cancel };
 }

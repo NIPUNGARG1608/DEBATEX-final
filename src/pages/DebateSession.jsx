@@ -17,9 +17,9 @@ export default function DebateSession() {
   const [error, setError] = useState(null);
   const scrollRef = useRef(null);
 
-  const { supported: sttSupported, listening, interim, finalText, error: sttError, start, stop, setFinalText } =
+  const { supported: sttSupported, listening, starting, interim, finalText, error: sttError, start, stop, setFinalText } =
     useSpeechRecognition({});
-  const { supported: ttsSupported, speaking, speak, cancel: cancelSpeak } = useEdgeSpeechSynthesis();
+  const { supported: ttsSupported, speaking, loading, error: ttsError, speak, cancel: cancelSpeak } = useEdgeSpeechSynthesis();
 
   // Load debate
   useEffect(() => {
@@ -29,11 +29,18 @@ export default function DebateSession() {
       const opener = r.data.messages[0];
       if (opener && ttsSupported) {
         const vc = r.data.voice_character;
-        setTimeout(() => speak(opener.content, { voiceCharacter: vc }), 300);
+        // Add error handling for TTS
+        speak(opener.content, { 
+          voiceCharacter: vc,
+          onError: (err) => {
+            console.error("TTS error for opener:", err);
+            toast.error("Failed to speak opening message. You can read it below.");
+          }
+        });
       }
     }).catch((e) => setError(e?.response?.data?.detail || "Debate not found"));
     return () => { cancelSpeak(); };
-  }, [id]);
+  }, [id, ttsSupported, speak]);
 
   // Auto-scroll on new messages
   useEffect(() => {
@@ -74,19 +81,43 @@ export default function DebateSession() {
     }
   };
 
-  const handleMicClick = () => {
+  // Push-to-talk: start listening when button is pressed
+  const handlePointerDown = () => {
     if (!sttSupported) {
       toast.error("Voice input not supported in this browser. Use the text field.");
       return;
     }
-    if (listening) {
+    // If AI is speaking, interrupt
+    if (speaking) cancelSpeak();
+    // Start listening only if not already listening
+    if (!listening && !starting) {
+      start();
+    }
+  };
+
+  // Push-to-talk: stop listening and send when button is released
+  const handlePointerUp = () => {
+    if (listening || starting) {
       stop();
       // Read from the ref to avoid stale closure — the last onresult may
       // have fired after the current render's finalText was captured.
       const captured = (finalTextRef.current || "").trim();
       if (captured) submitTurn(captured);
+    }
+  };
+
+  // Keep click handler for accessibility (space/enter key activation)
+  const handleMicClick = () => {
+    if (!sttSupported) {
+      toast.error("Voice input not supported in this browser. Use the text field.");
+      return;
+    }
+    // For click activation, toggle behavior
+    if (listening || starting) {
+      stop();
+      const captured = (finalTextRef.current || "").trim();
+      if (captured) submitTurn(captured);
     } else {
-      // If AI is speaking, interrupt
       if (speaking) cancelSpeak();
       start();
     }
@@ -111,6 +142,11 @@ export default function DebateSession() {
   useEffect(() => {
     if (sttError) toast.error(`Microphone: ${sttError}`);
   }, [sttError]);
+
+  // Surface TTS errors
+  useEffect(() => {
+    if (ttsError) toast.error(`Voice: ${ttsError}`);
+  }, [ttsError]);
 
   if (error) return <div className="p-10 text-muted_ink">{error}</div>;
   if (!debate) return <div className="p-10 font-mono text-xs uppercase tracking-[0.2em] text-muted_ink">Loading…</div>;
@@ -189,15 +225,26 @@ export default function DebateSession() {
 
       {/* Mic & controls */}
       <div className="flex flex-col items-center gap-6 mb-8">
-        <MicButton active={listening} onClick={handleMicClick} size="xl" testId="session-mic" />
-        <SoundWave active={listening || speaking} bars={40} tone="signal" />
+        <MicButton 
+          active={listening || starting} 
+          onClick={handleMicClick} 
+          onPointerDown={handlePointerDown}
+          onPointerUp={handlePointerUp}
+          size="xl" 
+          testId="session-mic" 
+        />
+        <SoundWave active={listening || speaking || loading || starting} bars={40} tone="signal" />
         <p className="font-mono text-xs uppercase tracking-[0.22em] text-muted_ink text-center max-w-md">
-          {listening
-            ? "Listening — tap the mic again to send your turn."
+          {loading
+            ? "Preparing voice…"
+            : starting
+            ? "Activating microphone…"
+            : listening
+            ? "Listening… release to send."
             : speaking
             ? "DebateX is speaking. Tap the mic to interrupt."
             : sttSupported
-            ? "Tap the mic to speak, or type below."
+            ? "Hold the mic button to speak, or type below."
             : "Voice not supported here — use the text field."}
         </p>
         {speaking && (
