@@ -1,4 +1,5 @@
 import { Mic, MicOff } from "lucide-react";
+import { useRef } from "react";
 
 /**
  * MicButton — the hero interaction. Two visual states: idle (subtle) and
@@ -22,20 +23,27 @@ export default function MicButton({
     size === "lg" ? "w-24 h-24" :
     "w-16 h-16";
   const iconSize = size === "xl" ? "w-12 h-12" : size === "lg" ? "w-8 h-8" : "w-6 h-6";
+  
+  // Track pointer down time to prevent click after pointer sequence
+  const pointerDownTimeRef = useRef(0);
 
   const handlePointerDown = (e) => {
     if (disabled) return;
     e.preventDefault();
+    e.stopPropagation();
+    pointerDownTimeRef.current = Date.now();
     onPointerDown?.(e);
   };
 
   const handlePointerUp = (e) => {
     if (disabled) return;
     e.preventDefault();
+    e.stopPropagation();
     onPointerUp?.(e);
   };
 
   const handlePointerLeave = (e) => {
+    if (disabled) return;
     // If user releases mouse outside the button while holding, still trigger stop
     if (active && onPointerUp) {
       onPointerUp(e);
@@ -45,18 +53,21 @@ export default function MicButton({
   const handlePointerCancel = (e) => {
     if (disabled) return;
     e.preventDefault();
+    e.stopPropagation();
     onPointerUp?.(e);
   };
 
   // Handle click for accessibility (space/enter key activation)
-  // Only trigger onClick if not actively recording (to avoid double-trigger)
+  // Only trigger onClick if this wasn't a quick pointer sequence
   const handleClick = (e) => {
     if (disabled) return;
-    // Don't trigger click if we're in the middle of a pointer sequence
-    // (pointer down -> pointer up will handle it)
-    if (!active) {
-      onClick?.(e);
+    // If pointer down happened very recently (within 200ms), it's part of a push-to-talk
+    // sequence and we should ignore this click
+    const timeSincePointerDown = Date.now() - pointerDownTimeRef.current;
+    if (timeSincePointerDown < 200) {
+      return;
     }
+    onClick?.(e);
   };
 
   return (

@@ -309,6 +309,7 @@ export function useGroqSpeechRecognition({
   const streamRef = useRef(null);
   const onTranscriptionRef = useRef(onTranscription);
   const onErrorRef = useRef(onError);
+  const isStartingRef = useRef(false);
   
   // Keep refs updated
   onTranscriptionRef.current = onTranscription;
@@ -343,7 +344,13 @@ export function useGroqSpeechRecognition({
   }, []);
 
   const start = useCallback(async () => {
-    console.log("[STT] start() called, supported:", supported);
+    console.log("[STT] start() called, supported:", supported, "isStarting:", isStartingRef.current);
+    
+    // Prevent multiple rapid start calls
+    if (isStartingRef.current) {
+      console.log("[STT] Already starting, ignoring call");
+      return;
+    }
     
     if (!supported) {
       const err = "Audio recording not supported in this browser.";
@@ -353,6 +360,7 @@ export function useGroqSpeechRecognition({
       return;
     }
 
+    isStartingRef.current = true;
     setError(null);
     audioChunksRef.current = [];
     console.log("[STT] Audio chunks reset, starting recording...");
@@ -401,6 +409,7 @@ export function useGroqSpeechRecognition({
       mediaRecorder.onstop = async () => {
         console.log("[STT] onstop triggered, chunks collected:", audioChunksRef.current.length);
         setRecording(false);
+        isStartingRef.current = false;
         
         // Stop all tracks to release microphone
         if (streamRef.current) {
@@ -490,6 +499,7 @@ export function useGroqSpeechRecognition({
         const err = event.error?.message || "Recording error";
         setError(err);
         setRecording(false);
+        isStartingRef.current = false;
         onErrorRef.current?.(err);
       };
 
@@ -509,6 +519,7 @@ export function useGroqSpeechRecognition({
 
     } catch (err) {
       console.error("[STT] Failed to start recording:", err);
+      isStartingRef.current = false;
       if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
         const errMsg = "Microphone permission denied. Please allow microphone access.";
         setError(errMsg);
