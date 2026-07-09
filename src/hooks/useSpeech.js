@@ -122,13 +122,22 @@ export function useSpeechRecognition({ lang = "en-US", onFinal } = {}) {
     };
 
     rec.onerror = (event) => {
-      console.warn("Speech recognition error:", event.error);
+      console.warn("Speech recognition error:", event.error, event.message);
       setStarting(false);
       // "aborted" is expected when the user manually stops — don't surface it
       if (event.error === "aborted") {
         shouldRestartRef.current = false;
         isRunningRef.current = false;
         setListening(false);
+        return;
+      }
+      // "not-allowed" = permission denied - this is critical
+      if (event.error === "not-allowed") {
+        console.error("Microphone permission denied. Please allow microphone access in browser settings.");
+        shouldRestartRef.current = false;
+        isRunningRef.current = false;
+        setListening(false);
+        setError("Microphone permission denied. Please allow microphone access and try again.");
         return;
       }
       // "no-speech" is common and not critical - just log it
