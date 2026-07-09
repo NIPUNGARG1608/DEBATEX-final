@@ -22,6 +22,7 @@ import re
 import json
 import uuid
 import logging
+import io
 import bcrypt
 import jwt as pyjwt
 from groq import Groq
@@ -449,6 +450,78 @@ async def list_modes():
 async def list_voices():
     """Return available voice character profiles."""
     return [vc for vc in VOICE_CHARACTERS.values()]
+
+
+# --------------------------------------------------------------------------- #
+# Route: Speech-to-Text (Groq Whisper)
+# --------------------------------------------------------------------------- #
+@api.post("/stt")
+async def speech_to_text(request: Request):
+    """
+    Convert speech to text using Groq's Whisper API.
+    Accepts audio file (wav, mp3, webm, etc.) and returns transcription.
+    
+    Supported formats: wav, mp3, mp4, mpeg, mpga, m4a, ogg, oga, ogg, webm, flac
+    Max file size: 25MB (Groq free tier limit)
+    Model: whisper-large-v3-turbo (high-accuracy, fast)
+    """
+    if not groq_client:
+        raise HTTPException(
+            status_code=503,
+            detail="GROQ_API_KEY is not configured on the server. Please set it in backend/.env and restart the backend."
+        )
+    
+    # Check content type for multipart form data
+    content_type = request.headers.get("content-type", "")
+    if not content_type.startswith("multipart/form-data"):
+        raise HTTPException(
+            status_code=400,
+            detail="Content-Type must be multipart/form-data"
+        )
+    
+    try:
+        # Parse the multipart form data
+        form = await request.form()
+        
+        # Get the audio file
+        if "file" not in form:
+            raise HTTPException(status_code=400, detail="No audio file provided. Use 'file' as the form field name.")
+        
+        audio_file = form["file"]
+        
+        # Check file size (25MB limit for Groq free tier)
+        file_size = 0
+        audio_bytes = b""
+        async for chunk in audio_file:
+            file_size += len(chunk)
+            audio_bytes += chunk
+            if file_size > 25 * 1024 * 1024:  # 25MB
+                raise HTTPException(
+                    status_code=400,
+                    detail="Audio file exceeds 25MB limit. Please record a shorter clip."
+                )
+        
+        if file_size == 0:
+            raise HTTPException(status_code=400, detail="Audio file is empty")
+        
+        # Get filename and determine extension
+        filename = audio_file.filename or "audio.webm"
+        
+        # Call Groq Whisper API
+        transcription = groq_client.audio.transcriptions.create(
+            file=(filename, audio_bytes),
+            model="whisper-large-v3-turbo",
+            response_format="json",
+            language="en",  # English, can be made configurable
+        )
+        
+        return {"text": transcription.text, "confidence": getattr(transcription, "confidence", None)}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Groq Whisper STT error: {e}")
+        raise HTTPException(status_code=502, detail=f"Speech-to-text error: {str(e)[:200]}")
 
 
 # --------------------------------------------------------------------------- #

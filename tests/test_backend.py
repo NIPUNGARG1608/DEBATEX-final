@@ -213,6 +213,83 @@ class TestReportGeneration:
         assert report["overall_score"] == 60
 
 
+# ── STT (Speech-to-Text) tests ────────────────────────────────────────────────
+class TestSTTEndpoint:
+    @pytest.fixture
+    def client(self):
+        return TestClient(server_module.app)
+
+    @pytest.fixture
+    def auth_headers(self, client):
+        """Register a user and return auth headers."""
+        resp = client.post("/api/auth/signup", json={
+            "email": "stt-test@debatex.io",
+            "password": "Password123",
+            "name": "STT Test User"
+        })
+        assert resp.status_code == 200
+        token = resp.json()["token"]
+        return {"Authorization": f"Bearer {token}"}
+
+    def test_stt_requires_multipart_form(self, client, auth_headers):
+        """STT endpoint should reject non-multipart requests."""
+        resp = client.post("/api/stt", json={"file": "test"}, headers=auth_headers)
+        assert resp.status_code == 400
+        assert "multipart/form-data" in resp.json()["detail"]
+
+    def test_stt_missing_file(self, client, auth_headers):
+        """STT endpoint should reject requests without a file."""
+        resp = client.post(
+            "/api/stt",
+            content=b"",
+            headers={**auth_headers, "Content-Type": "multipart/form-data; boundary=----WebKitFormBoundary"},
+        )
+        assert resp.status_code == 400
+        assert "No audio file provided" in resp.json()["detail"]
+
+    def test_stt_empty_file(self, client, auth_headers):
+        """STT endpoint should reject empty audio files."""
+        import io
+        resp = client.post(
+            "/api/stt",
+            content=b"------WebKitFormBoundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"empty.webm\"\r\n\r\n\r\n------WebKitFormBoundary--",
+            headers={**auth_headers, "Content-Type": "multipart/form-data; boundary=----WebKitFormBoundary"},
+        )
+        assert resp.status_code == 400
+        assert "empty" in resp.json()["detail"].lower()
+
+    def test_stt_transcription_success(self, client, auth_headers):
+        """STT endpoint should return transcribed text on success."""
+        # Mock the Groq audio transcription
+        mock_transcription = MagicMock()
+        mock_transcription.text = "Hello, this is a test transcription."
+        mock_transcription.confidence = 0.95
+
+        mock_groq = MagicMock()
+        mock_groq.audio.transcriptions.create.return_value = mock_transcription
+
+        # Create a minimal webm audio blob (just for testing)
+        import io
+        audio_data = b"\x1a\x45\xdf\xa3"  # Minimal WebM header
+
+        with patch.object(server_module, "groq_client", mock_groq):
+            resp = client.post(
+                "/api/stt",
+                content=(
+                    b"------WebKitFormBoundary\r\n"
+                    b"Content-Disposition: form-data; name=\"file\"; filename=\"test.webm\"\r\n"
+                    b"Content-Type: audio/webm\r\n\r\n" + audio_data + b"\r\n"
+                    b"------WebKitFormBoundary--"
+                ),
+                headers={**auth_headers, "Content-Type": "multipart/form-data; boundary=----WebKitFormBoundary"},
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "text" in data
+        assert data["text"] == "Hello, this is a test transcription."
+
+
 # ── FastAPI endpoints (HTTP level) ────────────────────────────────────────────
 # We use in-memory MongoDB mock for these tests
 class TestAPIEndpoints:

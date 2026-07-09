@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import api from "@/lib/api";
 import { toast } from "sonner";
-import { useSpeechRecognition, useEdgeSpeechSynthesis } from "@/hooks/useSpeech";
+import { useGroqSpeechRecognition, useEdgeSpeechSynthesis } from "@/hooks/useSpeech";
 import MicButton from "@/components/MicButton";
 import SoundWave from "@/components/SoundWave";
 import { Send, StopCircle, Flag, Loader2, Globe } from "lucide-react";
@@ -15,10 +15,29 @@ export default function DebateSession() {
   const [sending, setSending] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
   const [error, setError] = useState(null);
+  const [transcribedText, setTranscribedText] = useState("");
   const scrollRef = useRef(null);
 
-  const { supported: sttSupported, listening, starting, interim, finalText, error: sttError, start, stop, setFinalText, getCapturedText } =
-    useSpeechRecognition({});
+  // Use Groq Whisper STT (more reliable than Web Speech API)
+  const { 
+    supported: sttSupported, 
+    recording, 
+    transcribing, 
+    error: sttError, 
+    start: startRecording, 
+    stop: stopRecording 
+  } = useGroqSpeechRecognition({
+    onTranscription: (text) => {
+      setTranscribedText(text);
+      if (text && text.trim()) {
+        submitTurn(text);
+      }
+    },
+    onError: (err) => {
+      toast.error(`STT Error: ${err}`);
+    },
+  });
+
   const { supported: ttsSupported, speaking, loading, error: ttsError, speak, cancel: cancelSpeak } = useEdgeSpeechSynthesis();
 
   // Load debate
@@ -45,18 +64,14 @@ export default function DebateSession() {
   // Auto-scroll on new messages
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [debate?.messages?.length, interim]);
-
-  // Ref to track the latest finalText for immediate access after stop()
-  const finalTextRef = useRef("");
-  useEffect(() => { finalTextRef.current = finalText; }, [finalText]);
+  }, [debate?.messages?.length, transcribedText]);
 
   const submitTurn = async (message) => {
     const clean = (message || "").trim();
     if (!clean || sending) return;
     setSending(true);
     setTextInput("");
-    setFinalText("");
+    setTranscribedText("");
 
     // Optimistic user message
     setDebate((prev) => ({
@@ -80,7 +95,7 @@ export default function DebateSession() {
     }
   };
 
-  // Push-to-talk: start listening when button is pressed
+  // Push-to-talk: start recording when button is pressed
   const handlePointerDown = () => {
     if (!sttSupported) {
       toast.error("Voice input not supported in this browser. Use the text field.");
@@ -88,23 +103,17 @@ export default function DebateSession() {
     }
     // If AI is speaking, interrupt
     if (speaking) cancelSpeak();
-    // Start listening only if not already listening
-    if (!listening && !starting) {
-      start();
+    // Start recording only if not already recording
+    if (!recording && !transcribing) {
+      startRecording();
     }
   };
 
-  // Push-to-talk: stop listening and send when button is released
+  // Push-to-talk: stop recording and send when button is released
   const handlePointerUp = () => {
-    if (listening || starting) {
-      stop();
-      // Wait a small delay for any final results to be processed
-      // The onend handler will set listening to false after this
-      setTimeout(() => {
-        // Use getCapturedText to get the best available text (final or interim)
-        const captured = getCapturedText();
-        if (captured) submitTurn(captured);
-      }, 300);
+    if (recording) {
+      stopRecording();
+      // The transcription will be handled by the onTranscription callback
     }
   };
 
@@ -115,16 +124,11 @@ export default function DebateSession() {
       return;
     }
     // For click activation, toggle behavior
-    if (listening || starting) {
-      stop();
-      // Wait for final results to be processed
-      setTimeout(() => {
-        const captured = getCapturedText();
-        if (captured) submitTurn(captured);
-      }, 300);
+    if (recording) {
+      stopRecording();
     } else {
       if (speaking) cancelSpeak();
-      start();
+      startRecording();
     }
   };
 
@@ -143,7 +147,7 @@ export default function DebateSession() {
     }
   };
 
-  // Surface STT errors (e.g. "not-allowed" = mic permission denied)
+  // Surface STT errors
   useEffect(() => {
     if (sttError) toast.error(`Microphone: ${sttError}`);
   }, [sttError]);
@@ -211,11 +215,11 @@ export default function DebateSession() {
             </div>
           </div>
         ))}
-        {interim && (
+        {transcribedText && (
           <div className="flex justify-end">
             <div className="max-w-[85%] text-right opacity-60">
-              <p className="font-mono text-[10px] uppercase tracking-[0.28em] mb-2 text-parchment">You (live)</p>
-              <p className="font-serif text-xl md:text-2xl leading-snug italic">{interim}</p>
+              <p className="font-mono text-[10px] uppercase tracking-[0.28em] mb-2 text-parchment">You (transcribed)</p>
+              <p className="font-serif text-xl md:text-2xl leading-snug italic">{transcribedText}</p>
             </div>
           </div>
         )}
@@ -231,21 +235,21 @@ export default function DebateSession() {
        {/* Mic & controls */}
       <div className="flex flex-col items-center gap-6 mb-8">
         <MicButton 
-          active={listening || starting} 
+          active={recording || transcribing} 
           onClick={handleMicClick} 
           onPointerDown={handlePointerDown}
           onPointerUp={handlePointerUp}
           size="xl" 
           testId="session-mic" 
         />
-        <SoundWave active={listening || speaking || loading || starting} bars={40} tone="signal" />
+        <SoundWave active={recording || speaking || loading || transcribing} bars={40} tone="signal" />
         <p className="font-mono text-xs uppercase tracking-[0.22em] text-muted_ink text-center max-w-md">
           {loading
             ? "Preparing voice…"
-            : starting
-            ? "Activating microphone…"
-            : listening
-            ? "Listening… release to send."
+            : transcribing
+            ? "Transcribing your speech…"
+            : recording
+            ? "Recording… release to send."
             : speaking
             ? "DebateX is speaking. Tap the mic to interrupt."
             : sttSupported
@@ -264,11 +268,11 @@ export default function DebateSession() {
       </div>
 
       {/* Live speech preview (shows what's being captured) */}
-      {listening && (
+      {recording && (
         <div className="mb-6 max-w-2xl mx-auto">
-          <p className="font-mono text-[10px] uppercase tracking-[0.28em] text-signal mb-2">You're saying:</p>
+          <p className="font-mono text-[10px] uppercase tracking-[0.28em] text-signal mb-2">Recording…</p>
           <p className="font-serif text-lg text-parchment bg-elevated border border-rule rounded-sm px-4 py-3 min-h-[60px]">
-            {interim || finalText || "…"}
+            Release the button to transcribe your speech.
           </p>
         </div>
       )}
